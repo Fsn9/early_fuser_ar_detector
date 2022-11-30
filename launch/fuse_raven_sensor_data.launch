@@ -10,7 +10,8 @@
     <remap from="/mavros/global_position/local" to="/raven/mavros/global_position/local"/>
     <remap from="/mavros/imu/data" to="/raven/mavros/imu/data"/>
         
-    <!--Aliases for bags-->
+    <!--Args-->
+    <arg name="bag_freq" default="5"/>
     <arg name="path" default="/home/fsn9/catkin_ws/src/platform_detector/bags/"/>
     <arg name="test_15" default="test_15.bag"/>
     <arg name="test_16" default="test_16.bag"/>
@@ -39,7 +40,7 @@
     /mavros/state 
     /mavros/imu/data"/>
 
-    <!-- Set sim time -->
+    <!-- Params -->
     <param name="/use_sim_time" value="true" />
 
     <!-- Launch bags-->
@@ -49,7 +50,7 @@
     $(arg path)$(arg test_17)
     --topics $(arg topics)
     --loop
-    --rate 5
+    --rate $(arg bag_freq)
     " />
     
     <!-- Important transforms-->
