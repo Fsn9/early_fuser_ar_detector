@@ -1,0 +1,70 @@
+<launch>
+    <!-- Putting namespace of raven in topics name-->
+    <remap from="/usb_cam/image_raw/camera_info" to="/raven/usb_cam/image_raw/camera_info"/>
+    <remap from="/usb_cam/image_raw/compressed" to="/raven/usb_cam/image_raw/compressed"/>
+    <remap from="/image_raw/compressed" to="/raven/image_raw/compressed"/>
+    <remap from="/image_raw/camera_info" to="/raven/image_raw/camera_info"/>
+    <remap from="/mavros/state" to="/raven/mavros/state"/>
+    <remap from="/mavros/battery" to="/raven/mavros/battery"/>
+    <remap from="/os_cloud_node/points" to="/raven/os_cloud_node/points"/>
+    <remap from="/mavros/global_position/local" to="/raven/mavros/global_position/local"/>
+    <remap from="/mavros/imu/data" to="/raven/mavros/imu/data"/>
+        
+    <!--Aliases for bags-->
+    <arg name="path" default="/home/fsn9/catkin_ws/src/platform_detector/bags/"/>
+    <arg name="test_15" default="test_15.bag"/>
+    <arg name="test_16" default="test_16.bag"/>
+    <arg name="test_17" default="test_17.bag"/>
+    <arg name="test_18" default="test_18.bag"/>
+    <arg name="test_19" default="test_19.bag"/>
+    <arg name="test_20" default="test_20.bag"/>
+    <arg name="test_21" default="test_21.bag"/>
+    <arg name="test_22" default="test_22.bag"/>
+    <arg name="test_23" default="test_23.bag"/>
+    <arg name="test_24" default="test_24.bag"/>
+    <arg name="test_25" default="test_25.bag"/>
+    <arg name="test_26" default="test_26.bag"/>
+    <arg name="test_27" default="test_27.bag"/>
+    <arg name="test_28" default="test_28.bag"/>
+    <arg name="test_29" default="test_29.bag"/>
+    <arg name="test_30" default="test_30.bag"/>
+    <arg name="test_31" default="test_31.bag"/>
+    <arg name="test_32" default="test_32.bag"/>
+    <arg name="all_bags" default="*.bag"/>
+    <arg name="topics" default="/usb_cam/image_raw/camera_info 
+    /usb_cam/image_raw/compressed 
+    /image_raw/compressed 
+    /image_raw/camera_info 
+    /os_cloud_node/points 
+    /mavros/state 
+    /mavros/imu/data"/>
+
+    <!-- Set sim time -->
+    <param name="/use_sim_time" value="true" />
+
+    <!-- Launch bags-->
+    <node pkg="rosbag" type="play" name="bags" output="screen" args=" --clock 
+    $(arg path)$(arg test_15)
+    $(arg path)$(arg test_16)
+    $(arg path)$(arg test_17)
+    --topics $(arg topics)
+    --loop
+    --rate 5
+    " />
+    
+    <!-- Important transforms-->
+    <!--<node pkg="rosbag" type="play" name="bags" output="screen" args=" clock $(arg path)$(arg test_18) $(arg path)$(arg test_19) $(arg path)$(arg test_20) $(arg path)$(arg test_21) loop"/>-->
+    <node pkg="tf" type="static_transform_publisher" name="cam2map" args="0 0 0 0 0 0 1  map cam 30" />
+    <node pkg="tf" type="static_transform_publisher" name="camera_frame2cam" args="0 0 0 0 0 0 1  cam camera_frame 30" />
+    <!-- RIGHT -->
+    <node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.119842 -0.22668 0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />
+    <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="-0.119842 0.22668 -0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
+    <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.0570006 0.119842 -0.22668 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
+    <node pkg="tf" type="static_transform_publisher" name="lidar2os_sensor" args="0 0 0 0 0 0 1  os_sensor lidar 30" />
+
+    <!-- Launch fuser node-->
+    <node pkg="platform_detector" type="fuser" name="fuser" output="screen"/>
+
+    <!-- Launch Rviz -->
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find platform_detector)/rviz/visualize.rviz" />
+</launch>

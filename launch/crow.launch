@@ -1,0 +1,54 @@
+<launch>
+    <remap from="/usb_cam/image_raw/camera_info" to="/crow/usb_cam/image_raw/camera_info"/>
+    <remap from="/usb_cam/image_raw/compressed" to="/crow/usb_cam/image_raw/compressed"/>
+    <remap from="/image_raw/compressed" to="/crow/image_raw/compressed"/>
+    <remap from="/image_raw/camera_info" to="/crow/image_raw/camera_info"/>
+    <remap from="/mavros/state" to="/crow/mavros/state"/>
+    <remap from="/mavros/battery" to="/crow/mavros/battery"/>
+    <remap from="/os_cloud_node/points" to="/crow/os_cloud_node/points"/>
+    <remap from="/mavros/global_position/local" to="/crow/mavros/global_position/local"/>
+    <remap from="/mavros/imu/data" to="/crow/mavros/imu/data"/>
+    
+    <arg name="path" default="/home/fsn9/catkin_ws/src/platform_detector/bags/"/>
+    <arg name="test_15" default="test_15.bag"/>
+    <arg name="test_16" default="test_16.bag"/>
+    <arg name="test_17" default="test_17.bag"/>
+    <arg name="test_18" default="test_18.bag"/>
+    <arg name="test_19" default="test_19.bag"/>
+    <arg name="test_20" default="test_20.bag"/>
+    <arg name="test_21" default="test_21.bag"/>
+    <arg name="test_22" default="test_22.bag"/>
+    <arg name="test_23" default="test_23.bag"/>
+    <arg name="test_24" default="test_24.bag"/>
+    <arg name="test_25" default="test_25.bag"/>
+    <arg name="test_26" default="test_26.bag"/>
+    <arg name="test_27" default="test_27.bag"/>
+    <arg name="test_28" default="test_28.bag"/>
+    <arg name="test_29" default="test_29.bag"/>
+    <arg name="test_30" default="test_30.bag"/>
+    <arg name="test_31" default="test_31.bag"/>
+    <arg name="test_32" default="test_32.bag"/>
+
+    <arg name="all_bags" default="*.bag"/>
+
+    <node pkg="rosbag" type="play" name="bags" output="screen" args=" --clock 
+    $(arg path)$(arg test_19)
+    $(arg path)$(arg test_20)
+    $(arg path)$(arg test_21)
+    $(arg path)$(arg test_22)
+    --loop
+    " />
+    
+    <!--<node pkg="rosbag" type="play" name="bags" output="screen" args=" clock $(arg path)$(arg test_18) $(arg path)$(arg test_19) $(arg path)$(arg test_20) $(arg path)$(arg test_21) loop"/>-->
+
+    
+    <node pkg="tf" type="static_transform_publisher" name="cam2map" args="0 0 0 0 0 0 1  map cam 30" />
+    <node pkg="tf" type="static_transform_publisher" name="camera_frame2cam" args="0 0 0 0 0 0 1  cam camera_frame 30" />
+
+    <!-- RIGHT -->
+    <node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.119842 -0.22668 0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />
+
+    <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="-0.119842 0.22668 -0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
+    <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.0570006 0.119842 -0.22668 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
+    <node pkg="tf" type="static_transform_publisher" name="lidar2os_sensor" args="0 0 0 0 0 0 1  os_sensor lidar 30" />
+</launch>

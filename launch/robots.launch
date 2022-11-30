@@ -1,0 +1,4 @@
+<launch>
+	<include ns="crow" file="$(find platform_detector)/launch/crow.launch"/>
+	<include ns="raven" file="$(find platform_detector)/launch/raven.launch"/>
+</launch>
