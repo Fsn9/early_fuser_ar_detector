@@ -41,7 +41,12 @@
     /mavros/imu/data"/>
 
     <!-- Params -->
-    <param name="/use_sim_time" value="true" />
+    <param name="use_sim_time" value="true" />
+    <param name="pcl_data_topic" value="raven/os_cloud_node/points"/>
+    <param name="thermal_data_topic" value="raven/usb_cam/image_raw/compressed"/>
+    <param name="rgb_data_topic" value="raven/image_raw/compressed"/>
+    <param name="sync_sensors" value="true"/>
+    <param name="only_cameras_sync" value="true"/> <!-- sync cameras but not point cloud -->
 
     <!-- Launch bags-->
     <node pkg="rosbag" type="play" name="bags" output="screen" args=" --clock 

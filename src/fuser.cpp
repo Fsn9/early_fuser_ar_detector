@@ -40,8 +40,8 @@
 #include <pcl_ros/impl/transforms.hpp>
 
 
-typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage> SyncPolicy_vt;
-typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, pcl::PointCloud<pcl::PointXYZ>> SyncPolicy_vtl;
+typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage> SyncPolicy_visual_thermal;
+typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, pcl::PointCloud<pcl::PointXYZ>> SyncPolicy_visual_thermal_pcl;
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_output(new pcl::PointCloud<pcl::PointXYZ>);
 tf::StampedTransform lidar2cam_tf;
@@ -89,6 +89,7 @@ class Fuser
 		Fuser(std::shared_ptr<ros::NodeHandle> nh)
 		{
 			nh_ = nh;
+			// Set parameters
 			dataset_path_ = "/home/fsn9/Desktop/presentation/";
 			im_format_dataset_ = ".bmp";
 			num_frames_ = 0;
@@ -97,12 +98,61 @@ class Fuser
 			ty_thermal_ = 120;
 			float warp_values[] = {1.0, 0.0, tx_thermal_, 0.0, 1.0, ty_thermal_};
 			cv::Mat translation_thermal_(2, 3, CV_32F, warp_values);
-			fused_img_pub_ = nh->advertise<sensor_msgs::Image>("early_fused_input", 1);
+			fused_image_pub_ = nh->advertise<sensor_msgs::Image>("early_fused_input", 1);
 			final_pcl_pub_ = nh->advertise<sensor_msgs::PointCloud2>("final_pcl", 1);
 			cv::Mat black_image_(cv::Size(1440,1080), CV_8UC1); // @TODO: solve hardcoded width and height
+
+			// Load ros params
+			std::string pcl_data_topic; nh->getParam("pcl_data_topic", pcl_data_topic);
+			std::string thermal_data_topic; nh->getParam("thermal_data_topic", thermal_data_topic);
+			std::string rgb_data_topic; nh->getParam("rgb_data_topic", rgb_data_topic);
+			bool sync_sensors; nh->getParam("sync_sensors", sync_sensors);
+			bool only_cameras_sync; nh->getParam("only_cameras_sync", only_cameras_sync);
+
+			// Load camera infos
+			load_cameras_info();
+
+			/* Subscribers */
+			// Synchronization
+			if(sync_sensors)
+			{
+				// Create synched subscriber objects
+				pcl_sub_sync_ = std::make_unique<message_filters::Subscriber<pcl::PointCloud<pcl::PointXYZ>>>(*nh, pcl_data_topic, 1);
+				pcl::PointCloud<pcl::PointXYZ> pcl_first_msg = *(ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZ>>(pcl_data_topic));
+				
+				thermal_sub_sync_ = std::make_unique<message_filters::Subscriber<sensor_msgs::CompressedImage>>(*nh, thermal_data_topic, 1);
+				sensor_msgs::CompressedImage thermal_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>(thermal_data_topic));
+
+				rgb_sub_sync_ = std::make_unique<message_filters::Subscriber<sensor_msgs::CompressedImage>>(*nh, rgb_data_topic, 1);
+				sensor_msgs::CompressedImage rgb_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>(rgb_data_topic));
+
+				if(only_cameras_sync)
+				{
+					sync_visual_thermal_ = std::make_unique<message_filters::Synchronizer<SyncPolicy_visual_thermal>>(SyncPolicy_visual_thermal(100), *rgb_sub_sync_, *thermal_sub_sync_);
+					sync_visual_thermal_->registerCallback(boost::bind(&Fuser::cb_cameras, this, _1, _2));
+				}
+				else
+				{
+					sync_visual_thermal_pcl_ = std::make_unique<message_filters::Synchronizer<SyncPolicy_visual_thermal_pcl>>(SyncPolicy_visual_thermal_pcl(100), *rgb_sub_sync_, *thermal_sub_sync_, *pcl_sub_sync_);				
+					sync_visual_thermal_pcl_->registerCallback(boost::bind(&Fuser::cb_sensors, this, _1, _2, _3));
+				}
+			}
+			// Async
+			else
+			{
+				pcl_sub_ = nh->subscribe(pcl_data_topic, 1000, &Fuser::cb_pcl, this);
+				pcl::PointCloud<pcl::PointXYZ> pcl_first_msg = *(ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZ>>(pcl_data_topic));
+				//sensor_msgs::PointCloud2ConstPtr pcl_first_msg = ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/raven/os_cloud_node/points", nh);
+
+				thermal_sub_ = nh->subscribe(thermal_data_topic, 1000, &Fuser::cb_thermal, this);
+				sensor_msgs::CompressedImage thermal_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>(thermal_data_topic));
+
+				rgb_sub_ = nh->subscribe(rgb_data_topic, 1000, &Fuser::cb_rgb, this);
+				sensor_msgs::CompressedImage rgb_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>(rgb_data_topic));
+			}
 		}
 
-		void listen_pcl(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr &pcl_msg)
+		void cb_pcl(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr &pcl_msg)
 		{
 			ROS_INFO("Pcl arrived");
 			/*
@@ -141,7 +191,7 @@ class Fuser
 			*/
 		}
 		
-		void listen_thermal(const sensor_msgs::CompressedImage::ConstPtr &thermal_msg)
+		void cb_thermal(const sensor_msgs::CompressedImage::ConstPtr &thermal_msg)
 		{
 			ROS_INFO("Thermal arrived");
 			last_thermal_.header = thermal_msg->header;
@@ -149,7 +199,7 @@ class Fuser
 			last_thermal_.data = thermal_msg->data;
 		}
 		
-		void listen_rgb(const sensor_msgs::CompressedImage::ConstPtr &rgb_msg)
+		void cb_rgb(const sensor_msgs::CompressedImage::ConstPtr &rgb_msg)
 		{
 			ROS_INFO("Rgb arrived");
 			last_rgb_.header = rgb_msg->header;
@@ -157,7 +207,7 @@ class Fuser
 			last_rgb_.data = rgb_msg->data;
 		}
 
-		void listen_cameras(const sensor_msgs::CompressedImage::ConstPtr &rgb_msg, const sensor_msgs::CompressedImage::ConstPtr &thermal_msg)
+		void cb_cameras(const sensor_msgs::CompressedImage::ConstPtr &rgb_msg, const sensor_msgs::CompressedImage::ConstPtr &thermal_msg)
 		{
 			ROS_INFO("Both cameras arrived");
 			last_rgb_.header = rgb_msg->header;
@@ -417,18 +467,18 @@ class Fuser
 			//pcl::fromROSMsg(*pointcloud_msg.get(), *received_cloud_ptr.get());
 
 			// Make depthmap message
-			std_msgs::Header fused_img_header;
-			fused_img_header.seq = num_frames_;
-			fused_img_header.stamp = msg_header.stamp;
+			std_msgs::Header fused_image_header;
+			fused_image_header.seq = num_frames_;
+			fused_image_header.stamp = msg_header.stamp;
 
 			// Make final image message
-			sensor_msgs::Image img_msg;
+			sensor_msgs::Image image_msg;
 			// o 32FC3 nao vai de 0 a 255. sao floats tipo pontos xyz
 			// mudar para bgr8 ou rgb8
-			//fused_img_bridge = cv_bridge::CvImage(fused_img_header, sensor_msgs::image_encodings::TYPE_32FC3, lidar_image);
-			//fused_img_bridge = cv_bridge::CvImage(fused_img_header, sensor_msgs::image_encodings::BGR8, lidar_image);
-			//fused_img_bridge.toImageMsg(img_msg);
-			//fused_img_pub.publish(img_msg);
+			//fused_image_bridge = cv_bridge::CvImage(fused_image_header, sensor_msgs::image_encodings::TYPE_32FC3, lidar_image);
+			//fused_image_bridge = cv_bridge::CvImage(fused_image_header, sensor_msgs::image_encodings::BGR8, lidar_image);
+			//fused_image_bridge.toImageMsg(image_msg);
+			//fused_image_pub.publish(image_msg);
 
 			//std::cout << "lidarpoints: " << pointscount << std::endl;
 			num_frames_++;
@@ -466,9 +516,9 @@ class Fuser
 			cv::merge(channels, input);
 
 			// Publish fused inputs
-			cv_bridge::CvImage fused_img_bridge = cv_bridge::CvImage(fused_img_header, sensor_msgs::image_encodings::BGR8, input);
-			fused_img_bridge.toImageMsg(img_msg);
-			fused_img_pub_.publish(img_msg);
+			cv_bridge::CvImage fused_image_bridge = cv_bridge::CvImage(fused_image_header, sensor_msgs::image_encodings::BGR8, input);
+			fused_image_bridge.toImageMsg(image_msg);
+			fused_image_pub_.publish(image_msg);
 
 			/*
 			cv::namedWindow("input", cv::WINDOW_NORMAL);
@@ -487,45 +537,42 @@ class Fuser
 			// Data augment
 		}
 		
-		void set_camera_info(sensor_msgs::CameraInfo::ConstPtr &camera_info_msg)
+		void load_cameras_info()
 		{
-			ROS_INFO("Setting Camera info...");
-			if(camera_info_msg->header.frame_id == "cam")
-			{				
-				cam_info_rgb_.header = camera_info_msg->header;
-				cam_info_rgb_.height = camera_info_msg->height;
-				cam_info_rgb_.width = camera_info_msg->width;
-				cam_info_rgb_.distortion_model = camera_info_msg->distortion_model;
-				cam_info_rgb_.D = {-0.5138254596294459, 0.44290503681520377, 0.0020747506912668404, 0.0011692118540784398, -0.3681143872182688};
-				cam_info_rgb_.K = {1743.4035352713363, 0.0, 760.3723854064434, 0.0, 1739.4423246973906, 595.5405415362117, 0.0, 0.0, 1.0};	
-				//cam_info_rgb_.R = camera_info_msg->R;
-				//cam_info_rgb_.P = camera_info_msg->P;
-				cam_info_rgb_.R = {1,0,0,0,1,0,0,0,1};
-				cam_info_rgb_.P = {1743.4035352713363, 0.0, 760.3723854064434, 0.0,
-				0.0, 1739.4423246973906, 595.5405415362117, 0.0,
-				0.0, 0.0, 1.0, 0.0};
-				cam_info_rgb_.binning_x = camera_info_msg->binning_x;
-				cam_info_rgb_.binning_y = camera_info_msg->binning_y;
-				cam_info_rgb_.roi = camera_info_msg->roi;	
-			}
-			else
-			{
-				cam_info_thermal_.header = camera_info_msg->header;
-				cam_info_thermal_.height = camera_info_msg->height;
-				cam_info_thermal_.width = camera_info_msg->width;
-				cam_info_thermal_.distortion_model = camera_info_msg->distortion_model;
-				cam_info_thermal_.D = {-8.7955719162052803e-03, 2.7957338512854757e-01, 2.9514273519729906e-03, -7.8091815268012512e-03, -1.0969845111284882e+00};
-				cam_info_thermal_.K = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.,7.3675903031957341e+02,2.5406537636242152e+02,0.,0.,1.};	
-				//cam_info_thermal_.R = camera_info_msg->R;
-				//cam_info_thermal_.P = camera_info_msg->P;
-				cam_info_thermal_.R = {1,0,0,0,1,0,0,0,1};
-				cam_info_thermal_.P = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.0, 
-				0.,7.3675903031957341e+02,2.5406537636242152e+02, 0.0,
-				0.,0.,1.,0.};
-				cam_info_thermal_.binning_x = camera_info_msg->binning_x;
-				cam_info_thermal_.binning_y = camera_info_msg->binning_y;
-				cam_info_thermal_.roi = camera_info_msg->roi;
-			}
+			ROS_INFO("Loading Camera info...");
+			sensor_msgs::CameraInfoConstPtr info_rgb = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/raven/usb_cam/image_raw/camera_info");
+			sensor_msgs::CameraInfoConstPtr info_thermal = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/raven/image_raw/camera_info");
+
+			cam_info_rgb_.header = info_rgb->header;
+			cam_info_rgb_.height = info_rgb->height;
+			cam_info_rgb_.width = info_rgb->width;
+			cam_info_rgb_.distortion_model = info_rgb->distortion_model;
+			cam_info_rgb_.D = {-0.5138254596294459, 0.44290503681520377, 0.0020747506912668404, 0.0011692118540784398, -0.3681143872182688};
+			cam_info_rgb_.K = {1743.4035352713363, 0.0, 760.3723854064434, 0.0, 1739.4423246973906, 595.5405415362117, 0.0, 0.0, 1.0};	
+			//cam_info_rgb_.R = info_rgb->R;
+			//cam_info_rgb_.P = info_rgb->P;
+			cam_info_rgb_.R = {1,0,0,0,1,0,0,0,1};
+			cam_info_rgb_.P = {1743.4035352713363, 0.0, 760.3723854064434, 0.0,
+			0.0, 1739.4423246973906, 595.5405415362117, 0.0,
+			0.0, 0.0, 1.0, 0.0};
+			cam_info_rgb_.binning_x = info_rgb->binning_x;
+			cam_info_rgb_.binning_y = info_rgb->binning_y;
+			cam_info_rgb_.roi = info_rgb->roi;	
+			cam_info_thermal_.header = info_thermal->header;
+			cam_info_thermal_.height = info_thermal->height;
+			cam_info_thermal_.width = info_thermal->width;
+			cam_info_thermal_.distortion_model = info_thermal->distortion_model;
+			cam_info_thermal_.D = {-8.7955719162052803e-03, 2.7957338512854757e-01, 2.9514273519729906e-03, -7.8091815268012512e-03, -1.0969845111284882e+00};
+			cam_info_thermal_.K = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.,7.3675903031957341e+02,2.5406537636242152e+02,0.,0.,1.};	
+			//cam_info_thermal_.R = info_thermal->R;
+			//cam_info_thermal_.P = info_thermal->P;
+			cam_info_thermal_.R = {1,0,0,0,1,0,0,0,1};
+			cam_info_thermal_.P = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.0, 
+			0.,7.3675903031957341e+02,2.5406537636242152e+02, 0.0,
+			0.,0.,1.,0.};
+			cam_info_thermal_.binning_x = info_thermal->binning_x;
+			cam_info_thermal_.binning_y = info_thermal->binning_y;
+			cam_info_thermal_.roi = info_thermal->roi;
 		}
 	private:
 		PclMsg last_pcl_;
@@ -539,10 +586,18 @@ class Fuser
 		float max_range_;
 		float tx_thermal_, ty_thermal_; // Translation to align thermal with visual image
 		cv::Mat translation_thermal_; // The translation matrix
-		ros::Publisher fused_img_pub_;
+		ros::Publisher fused_image_pub_;
 		ros::Publisher final_pcl_pub_;
 		std::shared_ptr<ros::NodeHandle> nh_;
 		cv::Mat black_image_;
+		ros::Subscriber pcl_sub_;
+		ros::Subscriber thermal_sub_;
+		ros::Subscriber rgb_sub_;
+		std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> rgb_sub_sync_;
+		std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> thermal_sub_sync_;
+		std::unique_ptr<message_filters::Subscriber<pcl::PointCloud<pcl::PointXYZ>>> pcl_sub_sync_;
+		std::unique_ptr<message_filters::Synchronizer<SyncPolicy_visual_thermal>> sync_visual_thermal_;
+		std::unique_ptr<message_filters::Synchronizer<SyncPolicy_visual_thermal_pcl>> sync_visual_thermal_pcl_;
 };
 
 int main(int argc, char **argv)
@@ -553,46 +608,6 @@ int main(int argc, char **argv)
 	
 	// Initialize fuser
 	Fuser fuser(nh);
-	
-	// Subscribers
-	// LiDAR
-	
-	ros::Subscriber pcl_sub = nh->subscribe("/raven/os_cloud_node/points", 1000, &Fuser::listen_pcl, &fuser);
-	//sensor_msgs::PointCloud2ConstPtr pcl_first_msg = ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/raven/os_cloud_node/points", nh);
-	pcl::PointCloud<pcl::PointXYZ> pcl_first_msg = *(ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZ>>("/raven/os_cloud_node/points"));
-	// Thermal
-	ros::Subscriber thermal_sub = nh->subscribe("/raven/usb_cam/image_raw/compressed", 1000, &Fuser::listen_thermal, &fuser);
-	sensor_msgs::CompressedImage thermal_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>("/raven/usb_cam/image_raw/compressed"));
-	// Visual
-	ros::Subscriber rgb_sub = nh->subscribe("/raven/image_raw/compressed", 1000, &Fuser::listen_rgb, &fuser);
-	sensor_msgs::CompressedImage rgb_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>("/raven/image_raw/compressed"));
-	
-	// Create synched subscriber objects
-	//message_filters::Subscriber<sensor_msgs::CompressedImage> rgb_sub_sync(nh, "/raven/image_raw/compressed", 1);
-	//sensor_msgs::CompressedImage rgb_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>("/raven/image_raw/compressed", nh));
-
-	//message_filters::Subscriber<sensor_msgs::CompressedImage> thermal_sub_sync(nh, "/raven/usb_cam/image_raw/compressed", 1);
-	//sensor_msgs::CompressedImage thermal_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>("/raven/usb_cam/image_raw/compressed", nh));
-
-	//message_filters::Subscriber<pcl::PointCloud<pcl::PointXYZ>> lidar_sub_sync(nh, "/raven/os_cloud_node/points", 1);
-	//pcl::PointCloud<pcl::PointXYZ> pcl_first_msg = *(ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZ>>("/raven/os_cloud_node/points", nh));
-
-	//message_filters::Synchronizer<SyncPolicy_vt> sync_vt(SyncPolicy_vt(1000), rgb_sub_sync, thermal_sub_sync);
-	//message_filters::Synchronizer<SyncPolicy_vtl> sync_vtl(SyncPolicy_vtl(1000), rgb_sub_sync, thermal_sub_sync, lidar_sub_sync);
-    //sync_vt.registerCallback(boost::bind(&Fuser::listen_cameras, &fuser, _1, _2));
-	//sync_vtl.registerCallback(boost::bind(&Fuser::cb_sensors, &fuser, _1, _2, _3));
-	//boost::shared_ptr<message_filters::Synchronizer<v_t_SyncPolicy>> sync;
-	//boost::shared_ptr<message_filters::Synchronizer<v_t_l_SyncPolicy>> sync;
-	//sync_vt.reset(new message_filters::Synchronizer<SyncPolicy_vt>(SyncPolicy_vt(10), rgb_sub_sync, thermal_sub_sync));
-	//sync.reset(new message_filters::Synchronizer<SyncPolicy>(SyncPolicy(100), rgb_sub, thermal_sub)); // 10 para 100
-	// Subscribe
-	//sync->registerCallback(boost::bind(&Fuser::listen_cameras, &fuser,_1, _2));
-	
-	// Get camera infos and pass to fuser
-	sensor_msgs::CameraInfoConstPtr info = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/raven/image_raw/camera_info");
-	fuser.set_camera_info(info);
-	info = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/raven/usb_cam/image_raw/camera_info");
-	fuser.set_camera_info(info);
 
 	tf::TransformListener tf_listener;
 	ros::Rate rate(6);
