@@ -216,6 +216,14 @@ include_directories(
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
 
+include_directories(include)
+add_library(time_sync_lib STATIC
+  src/time_sync.cpp
+)
+target_link_libraries(time_sync_lib ${catkin_LIBRARIES})
+
 add_executable(fuser src/fuser.cpp)
 target_link_libraries(fuser ${PCL_LIBRARIES} ${catkin_LIBRARIES} ${OpenCV_LIBS})
-#add_dependencies(fuser platform_detector_generate_messages_cpp)
+
+add_executable(time_sync src/time_sync.cpp)
+target_link_libraries(time_sync ${PCL_LIBRARIES} ${catkin_LIBRARIES} ${OpenCV_LIBS} time_sync_lib)

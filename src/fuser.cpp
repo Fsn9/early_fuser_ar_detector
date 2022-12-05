@@ -142,7 +142,7 @@ class Fuser
 			{
 				pcl_sub_ = nh->subscribe(pcl_data_topic, 1000, &Fuser::cb_pcl, this);
 				pcl::PointCloud<pcl::PointXYZ> pcl_first_msg = *(ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZ>>(pcl_data_topic));
-				//sensor_msgs::PointCloud2ConstPtr pcl_first_msg = ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/raven/os_cloud_node/points", nh);
+				//sensor_msgs::PointCloud2ConstPtr pcl_first_msg = ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/os_cloud_node/points", nh);
 
 				thermal_sub_ = nh->subscribe(thermal_data_topic, 1000, &Fuser::cb_thermal, this);
 				sensor_msgs::CompressedImage thermal_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>(thermal_data_topic));
@@ -540,8 +540,8 @@ class Fuser
 		void load_cameras_info()
 		{
 			ROS_INFO("Loading Camera info...");
-			sensor_msgs::CameraInfoConstPtr info_rgb = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/raven/usb_cam/image_raw/camera_info");
-			sensor_msgs::CameraInfoConstPtr info_thermal = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/raven/image_raw/camera_info");
+			sensor_msgs::CameraInfoConstPtr info_rgb = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/usb_cam/image_raw/camera_info");
+			sensor_msgs::CameraInfoConstPtr info_thermal = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/image_raw/camera_info");
 
 			cam_info_rgb_.header = info_rgb->header;
 			cam_info_rgb_.height = info_rgb->height;

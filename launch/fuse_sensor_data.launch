@@ -1,15 +1,4 @@
-<launch>
-    <!-- Putting namespace of raven in topics name-->
-    <remap from="/usb_cam/image_raw/camera_info" to="/raven/usb_cam/image_raw/camera_info"/>
-    <remap from="/usb_cam/image_raw/compressed" to="/raven/usb_cam/image_raw/compressed"/>
-    <remap from="/image_raw/compressed" to="/raven/image_raw/compressed"/>
-    <remap from="/image_raw/camera_info" to="/raven/image_raw/camera_info"/>
-    <remap from="/mavros/state" to="/raven/mavros/state"/>
-    <remap from="/mavros/battery" to="/raven/mavros/battery"/>
-    <remap from="/os_cloud_node/points" to="/raven/os_cloud_node/points"/>
-    <remap from="/mavros/global_position/local" to="/raven/mavros/global_position/local"/>
-    <remap from="/mavros/imu/data" to="/raven/mavros/imu/data"/>
-        
+<launch>        
     <!--Args-->
     <arg name="bag_freq" default="5"/>
     <arg name="path" default="/home/fsn9/catkin_ws/src/platform_detector/bags/"/>
@@ -40,23 +29,42 @@
     /mavros/state 
     /mavros/imu/data"/>
 
+    <arg name="renamed_topics" default="
+        /usb_cam/image_raw/compressed:=/old/usb_cam/image_raw/compressed
+        /image_raw/compressed:=/old/image_raw/compressed
+        /os_cloud_node/points:=/old/os_cloud_node/points
+    "/>
+
+    <arg name="time_filtered_topics" default="
+        /usb_cam/image_raw/camera_info 
+        /image_raw/camera_info 
+        /usb_cam/image_raw/compressed 
+        /image_raw/compressed 
+        /os_cloud_node/points
+    "/>
+
     <!-- Params -->
     <param name="use_sim_time" value="true" />
-    <param name="pcl_data_topic" value="raven/os_cloud_node/points"/>
-    <param name="thermal_data_topic" value="raven/usb_cam/image_raw/compressed"/>
-    <param name="rgb_data_topic" value="raven/image_raw/compressed"/>
+    <param name="pcl_data_topic" value="/os_cloud_node/points"/>
+    <param name="thermal_data_topic" value="/usb_cam/image_raw/compressed"/>
+    <param name="rgb_data_topic" value="/image_raw/compressed"/>
     <param name="sync_sensors" value="true"/>
-    <param name="only_cameras_sync" value="true"/> <!-- sync cameras but not point cloud -->
+    <param name="only_cameras_sync" value="false"/> <!-- sync cameras but not point cloud -->
 
     <!-- Launch bags-->
-    <node pkg="rosbag" type="play" name="bags" output="screen" args=" --clock 
+    <node pkg="rosbag" type="play" name="bags" output="screen" args=" 
     $(arg path)$(arg test_15)
     $(arg path)$(arg test_16)
     $(arg path)$(arg test_17)
-    --topics $(arg topics)
+    $(arg renamed_topics)
+    --topics $(arg time_filtered_topics)
     --loop
     --rate $(arg bag_freq)
+    --clock
     " />
+
+    <!-- Launch time sync node to synchronize sensors timestamps -->
+    <include file="$(find platform_detector)/launch/time_sync.launch" />
     
     <!-- Important transforms-->
     <!--<node pkg="rosbag" type="play" name="bags" output="screen" args=" clock $(arg path)$(arg test_18) $(arg path)$(arg test_19) $(arg path)$(arg test_20) $(arg path)$(arg test_21) loop"/>-->

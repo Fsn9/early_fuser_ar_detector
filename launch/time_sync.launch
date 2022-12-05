@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+
+<!-- GPS=0
+     ODOM=1
+     IMG=2
+     IMGCOMP=3
+     PCL=4
+     TIME=5
+     IMU=6
+     SCAN=7
+     IMGINFO=8
+     STATUS=9
+     TWISTCOV=10
+     TWISTSTAMP=11 -->
+<launch>    
+    <node pkg="platform_detector" type="time_sync" name="ouster" output="screen" respawn="false">
+        <param name="topic_subscriber" value="/old/os_cloud_node/points"/>
+        <param name="topic_publisher" value="/os_cloud_node/points"/>
+        <param name="data_type" value="4"/>
+    </node>
+
+    <node pkg="platform_detector" type="time_sync" name="rgb_cam" output="screen" respawn="false">
+        <param name="topic_subscriber" value="/old/image_raw/compressed"/>
+        <param name="topic_publisher" value="/image_raw/compressed"/>
+        <param name="data_type" value="3"/>
+    </node>
+
+    <node pkg="platform_detector" type="time_sync" name="thermal_cam" output="screen" respawn="false">
+        <param name="topic_subscriber" value="/old/usb_cam/image_raw/compressed"/>
+        <param name="topic_publisher" value="/usb_cam/image_raw/compressed"/>
+        <param name="data_type" value="3"/>
+    </node>
+</launch>
