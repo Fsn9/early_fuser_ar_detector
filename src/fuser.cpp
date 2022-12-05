@@ -39,7 +39,7 @@
 #include <pcl_ros/transforms.h>
 #include <pcl_ros/impl/transforms.hpp>
 
-typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, pcl::PointCloud<pcl::PointXYZ>> SyncPolicy;
+typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, sensor_msgs::PointCloud2> SyncPolicy;
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_output(new pcl::PointCloud<pcl::PointXYZ>);
 tf::StampedTransform lidar2cam_tf;
@@ -115,8 +115,8 @@ class Fuser
 			if(sync_sensors)
 			{
 				// Create synched subscriber objects
-				pcl_sub_sync_ = std::make_unique<message_filters::Subscriber<pcl::PointCloud<pcl::PointXYZ>>>(*nh, pcl_data_topic, 1);
-				pcl::PointCloud<pcl::PointXYZ> pcl_first_msg = *(ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZ>>(pcl_data_topic));
+				pcl_sub_sync_ = std::make_unique<message_filters::Subscriber<sensor_msgs::PointCloud2>>(*nh, pcl_data_topic, 1);
+				sensor_msgs::PointCloud2 pcl_first_msg = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>(pcl_data_topic));
 				
 				thermal_sub_sync_ = std::make_unique<message_filters::Subscriber<sensor_msgs::CompressedImage>>(*nh, thermal_data_topic, 1);
 				sensor_msgs::CompressedImage thermal_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>(thermal_data_topic));
@@ -131,8 +131,7 @@ class Fuser
 			else
 			{
 				pcl_sub_ = nh->subscribe(pcl_data_topic, 1000, &Fuser::cb_pcl, this);
-				pcl::PointCloud<pcl::PointXYZ> pcl_first_msg = *(ros::topic::waitForMessage<pcl::PointCloud<pcl::PointXYZ>>(pcl_data_topic));
-				//sensor_msgs::PointCloud2ConstPtr pcl_first_msg = ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/os_cloud_node/points", nh);
+				sensor_msgs::PointCloud2ConstPtr pcl_first_msg = ros::topic::waitForMessage<sensor_msgs::PointCloud2>(pcl_data_topic);
 
 				thermal_sub_ = nh->subscribe(thermal_data_topic, 1000, &Fuser::cb_thermal, this);
 				sensor_msgs::CompressedImage thermal_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>(thermal_data_topic));
@@ -142,10 +141,9 @@ class Fuser
 			}
 		}
 
-		void cb_pcl(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr &pcl_msg)
+		void cb_pcl(const sensor_msgs::PointCloud2::ConstPtr &pcl_msg)
 		{
 			ROS_INFO("Pcl arrived");
-			/*
 			last_pcl_.header = pcl_msg->header;
 			last_pcl_.height = pcl_msg->height;
 			last_pcl_.width = pcl_msg->width;
@@ -155,30 +153,6 @@ class Fuser
 			last_pcl_.row_step = pcl_msg->row_step;
 			last_pcl_.data = pcl_msg->data;
 			last_pcl_.is_dense = pcl_msg->is_dense;
-			*/
-		}
-
-		void republish_pcl(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr &pcl_msg)
-		{
-			ROS_INFO("Pcl arrived");
-			/*
-			sensor_msgs::PointCloud2 new_pcl_msg = *pcl_msg;
-			std::cout << "before timestamp" << new_pcl_msg.header.stamp << "\n";
-			// https://answers.ros.org/question/172241/pcl-and-rostime/
-			new_pcl_msg.header.stamp = ros::Time::now();
-			//pcl_conversions::toPCL(ros::Time::now(), new_pcl_msg.header.stamp);
-			std::cout << "after timestamp" << new_pcl_msg.header.stamp << "\n";
-
-			last_pcl_.header = pcl_msg->header;
-			last_pcl_.height = pcl_msg->height;
-			last_pcl_.width = pcl_msg->width;
-			last_pcl_.fields = pcl_msg->fields;
-			last_pcl_.is_bigendian = pcl_msg->is_bigendian;
-			last_pcl_.point_step = pcl_msg->point_step;
-			last_pcl_.row_step = pcl_msg->row_step;
-			last_pcl_.data = pcl_msg->data;
-			last_pcl_.is_dense = pcl_msg->is_dense;
-			*/
 		}
 		
 		void cb_thermal(const sensor_msgs::CompressedImage::ConstPtr &thermal_msg)
@@ -197,21 +171,9 @@ class Fuser
 			last_rgb_.data = rgb_msg->data;
 		}
 
-		void cb_cameras(const sensor_msgs::CompressedImage::ConstPtr &rgb_msg, const sensor_msgs::CompressedImage::ConstPtr &thermal_msg)
+		void cb_sensors(const sensor_msgs::CompressedImage::ConstPtr& rgb_msg, const sensor_msgs::CompressedImage::ConstPtr& thermal_msg, const sensor_msgs::PointCloud2::ConstPtr& pcl_msg)
 		{
-			ROS_INFO("Both cameras arrived");
-			last_rgb_.header = rgb_msg->header;
-			last_rgb_.format = rgb_msg->format;
-			last_rgb_.data = rgb_msg->data;
-
-			last_thermal_.header = thermal_msg->header;
-			last_thermal_.format = thermal_msg->format;
-			last_thermal_.data = thermal_msg->data;
-		}
-
-		void cb_sensors(const sensor_msgs::CompressedImage::ConstPtr& rgb_msg, const sensor_msgs::CompressedImage::ConstPtr& thermal_msg, const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& pcl_msg)
-		{
-			ROS_INFO("All sensors arrived");
+			//ROS_INFO("All sensors arrived");
 			last_rgb_.header = rgb_msg->header;
 			last_rgb_.format = rgb_msg->format;
 			last_rgb_.data = rgb_msg->data;
@@ -220,7 +182,6 @@ class Fuser
 			last_thermal_.format = thermal_msg->format;
 			last_thermal_.data = thermal_msg->data;
 
-			/*
 			last_pcl_.header = pcl_msg->header;
 			last_pcl_.height = pcl_msg->height;
 			last_pcl_.width = pcl_msg->width;
@@ -230,7 +191,6 @@ class Fuser
 			last_pcl_.row_step = pcl_msg->row_step;
 			last_pcl_.data = pcl_msg->data;
 			last_pcl_.is_dense = pcl_msg->is_dense;
-			*/
 		}
 		
 		void fuse()
@@ -585,7 +545,7 @@ class Fuser
 		ros::Subscriber rgb_sub_;
 		std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> rgb_sub_sync_;
 		std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> thermal_sub_sync_;
-		std::unique_ptr<message_filters::Subscriber<pcl::PointCloud<pcl::PointXYZ>>> pcl_sub_sync_;
+		std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> pcl_sub_sync_;
 		std::unique_ptr<message_filters::Synchronizer<SyncPolicy>> synchronizer_;
 };
 
