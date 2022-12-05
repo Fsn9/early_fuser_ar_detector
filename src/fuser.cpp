@@ -39,9 +39,7 @@
 #include <pcl_ros/transforms.h>
 #include <pcl_ros/impl/transforms.hpp>
 
-
-typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage> SyncPolicy_visual_thermal;
-typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, pcl::PointCloud<pcl::PointXYZ>> SyncPolicy_visual_thermal_pcl;
+typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, pcl::PointCloud<pcl::PointXYZ>> SyncPolicy;
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_output(new pcl::PointCloud<pcl::PointXYZ>);
 tf::StampedTransform lidar2cam_tf;
@@ -126,16 +124,8 @@ class Fuser
 				rgb_sub_sync_ = std::make_unique<message_filters::Subscriber<sensor_msgs::CompressedImage>>(*nh, rgb_data_topic, 1);
 				sensor_msgs::CompressedImage rgb_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>(rgb_data_topic));
 
-				if(only_cameras_sync)
-				{
-					sync_visual_thermal_ = std::make_unique<message_filters::Synchronizer<SyncPolicy_visual_thermal>>(SyncPolicy_visual_thermal(100), *rgb_sub_sync_, *thermal_sub_sync_);
-					sync_visual_thermal_->registerCallback(boost::bind(&Fuser::cb_cameras, this, _1, _2));
-				}
-				else
-				{
-					sync_visual_thermal_pcl_ = std::make_unique<message_filters::Synchronizer<SyncPolicy_visual_thermal_pcl>>(SyncPolicy_visual_thermal_pcl(100), *rgb_sub_sync_, *thermal_sub_sync_, *pcl_sub_sync_);				
-					sync_visual_thermal_pcl_->registerCallback(boost::bind(&Fuser::cb_sensors, this, _1, _2, _3));
-				}
+				synchronizer_ = std::make_unique<message_filters::Synchronizer<SyncPolicy>>(SyncPolicy(100), *rgb_sub_sync_, *thermal_sub_sync_, *pcl_sub_sync_);				
+				synchronizer_->registerCallback(boost::bind(&Fuser::cb_sensors, this, _1, _2, _3));
 			}
 			// Async
 			else
@@ -596,8 +586,7 @@ class Fuser
 		std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> rgb_sub_sync_;
 		std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> thermal_sub_sync_;
 		std::unique_ptr<message_filters::Subscriber<pcl::PointCloud<pcl::PointXYZ>>> pcl_sub_sync_;
-		std::unique_ptr<message_filters::Synchronizer<SyncPolicy_visual_thermal>> sync_visual_thermal_;
-		std::unique_ptr<message_filters::Synchronizer<SyncPolicy_visual_thermal_pcl>> sync_visual_thermal_pcl_;
+		std::unique_ptr<message_filters::Synchronizer<SyncPolicy>> synchronizer_;
 };
 
 int main(int argc, char **argv)

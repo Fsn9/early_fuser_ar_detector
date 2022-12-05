@@ -49,7 +49,6 @@
     <param name="thermal_data_topic" value="/usb_cam/image_raw/compressed"/>
     <param name="rgb_data_topic" value="/image_raw/compressed"/>
     <param name="sync_sensors" value="true"/>
-    <param name="only_cameras_sync" value="false"/> <!-- sync cameras but not point cloud -->
 
     <!-- Launch bags-->
     <node pkg="rosbag" type="play" name="bags" output="screen" args=" 
