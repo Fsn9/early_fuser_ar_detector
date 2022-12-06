@@ -52,6 +52,15 @@ int main( int argc, char** argv )
 
   ros::Subscriber sub;
 
+  /// @brief If namespace needed in topic name
+  std::string ns = "";
+  nh.param<std::string>("namespace", ns, "");
+  if (!ns.empty())
+  {
+    topic_sub = "/" + ns + topic_sub;
+    topic_pub = "/" + ns + topic_pub;
+  }
+
   switch (data_type)
   {
   case GPS:

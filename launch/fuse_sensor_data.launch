@@ -1,72 +1,61 @@
 <launch>        
     <!--Args-->
     <arg name="bag_freq" default="5"/>
-    <arg name="path" default="/home/fsn9/catkin_ws/src/platform_detector/bags/"/>
-    <arg name="test_15" default="test_15.bag"/>
-    <arg name="test_16" default="test_16.bag"/>
-    <arg name="test_17" default="test_17.bag"/>
-    <arg name="test_18" default="test_18.bag"/>
-    <arg name="test_19" default="test_19.bag"/>
-    <arg name="test_20" default="test_20.bag"/>
-    <arg name="test_21" default="test_21.bag"/>
-    <arg name="test_22" default="test_22.bag"/>
-    <arg name="test_23" default="test_23.bag"/>
-    <arg name="test_24" default="test_24.bag"/>
-    <arg name="test_25" default="test_25.bag"/>
-    <arg name="test_26" default="test_26.bag"/>
-    <arg name="test_27" default="test_27.bag"/>
-    <arg name="test_28" default="test_28.bag"/>
-    <arg name="test_29" default="test_29.bag"/>
-    <arg name="test_30" default="test_30.bag"/>
-    <arg name="test_31" default="test_31.bag"/>
-    <arg name="test_32" default="test_32.bag"/>
+    <arg name="bag_path" default="$(find platform_detector)/bags"/>
+    <arg name="old_bags" default="$(arg bag_path)/old"/>
+    <arg name="14_07_bags" default="$(arg bag_path)/14_07_2022"/>
+    <arg name="15_03_bags" default="$(arg bag_path)/15_03_2022-Landing_ArTuga"/>
+    <arg name="20_07_bags" default="$(arg bag_path)/20-21-22_07_2022"/>
     <arg name="all_bags" default="*.bag"/>
-    <arg name="topics" default="/usb_cam/image_raw/camera_info 
-    /usb_cam/image_raw/compressed 
-    /image_raw/compressed 
-    /image_raw/camera_info 
-    /os_cloud_node/points 
-    /mavros/state 
-    /mavros/imu/data"/>
+    <arg name="namespace" value=""/>
 
+    <!-- Params -->
+    <param name="namespace" value="$(arg namespace)"/>
+    <param name="use_sim_time" value="true" />
+    <param name="sync_sensors" value="true"/>
+    
+    <!-- Variable args-->
+    <!-- if namespace is needed put the namespace in topic names-->
+    <arg name="topics" default="
+        $(arg namespace)/usb_cam/image_raw/camera_info 
+        $(arg namespace)/usb_cam/image_raw/compressed 
+        $(arg namespace)/image_raw/compressed 
+        $(arg namespace)/image_raw/camera_info 
+        $(arg namespace)/os_cloud_node/points"
+    />
     <arg name="renamed_topics" default="
-        /usb_cam/image_raw/compressed:=/old/usb_cam/image_raw/compressed
-        /image_raw/compressed:=/old/image_raw/compressed
-        /os_cloud_node/points:=/old/os_cloud_node/points
+        $(arg namespace)/usb_cam/image_raw/compressed:=$(arg namespace)/old/usb_cam/image_raw/compressed
+        $(arg namespace)/image_raw/compressed:=$(arg namespace)/old/image_raw/compressed
+        $(arg namespace)/os_cloud_node/points:=$(arg namespace)/old/os_cloud_node/points
     "/>
-
     <arg name="time_filtered_topics" default="
-        /usb_cam/image_raw/camera_info 
-        /image_raw/camera_info 
-        /usb_cam/image_raw/compressed 
-        /image_raw/compressed 
-        /os_cloud_node/points
+        $(arg namespace)/usb_cam/image_raw/compressed 
+        $(arg namespace)/image_raw/compressed
+        $(arg namespace)/os_cloud_node/points
     "/>
 
     <!-- Params -->
-    <param name="use_sim_time" value="true" />
-    <param name="pcl_data_topic" value="/os_cloud_node/points"/>
-    <param name="thermal_data_topic" value="/usb_cam/image_raw/compressed"/>
-    <param name="rgb_data_topic" value="/image_raw/compressed"/>
-    <param name="sync_sensors" value="true"/>
+    <param name="pcl_data_topic" value="$(arg namespace)/os_cloud_node/points"/>
+    <param name="thermal_data_topic" value="$(arg namespace)/usb_cam/image_raw/compressed"/>
+    <param name="thermal_info_topic" value="$(arg namespace)/usb_cam/image_raw/camera_info"/>
+    <param name="rgb_data_topic" value="$(arg namespace)/image_raw/compressed"/>
+    <param name="rgb_info_topic" value="$(arg namespace)/image_raw/camera_info"/>
 
     <!-- Launch bags-->
-    <node pkg="rosbag" type="play" name="bags" output="screen" args=" 
-    $(arg path)$(arg test_15)
-    $(arg path)$(arg test_16)
-    $(arg path)$(arg test_17)
+    <node pkg="rosbag" type="play" name="rosbag" output="screen" args="
+    $(arg old_bags)/test_15.bag
     $(arg renamed_topics)
-    --topics $(arg time_filtered_topics)
+    --topics $(arg topics)
     --loop
     --rate $(arg bag_freq)
     --clock
-    " />
+    "/>
 
     <!-- Launch time sync node to synchronize sensors timestamps -->
     <include file="$(find platform_detector)/launch/time_sync.launch" />
     
     <!-- Important transforms-->
-    <!--<node pkg="rosbag" type="play" name="bags" output="screen" args=" clock $(arg path)$(arg test_18) $(arg path)$(arg test_19) $(arg path)$(arg test_20) $(arg path)$(arg test_21) loop"/>-->
+    <!--<node pkg="rosbag" type="play" name="bags" output="screen" args=" clock $(arg bag_path)$(arg test_18) $(arg bag_path)$(arg test_19) $(arg bag_path)$(arg test_20) $(arg bag_path)$(arg test_21) loop"/>-->
     <node pkg="tf" type="static_transform_publisher" name="cam2map" args="0 0 0 0 0 0 1  map cam 30" />
     <node pkg="tf" type="static_transform_publisher" name="camera_frame2cam" args="0 0 0 0 0 0 1  cam camera_frame 30" />
     <!-- RIGHT -->
