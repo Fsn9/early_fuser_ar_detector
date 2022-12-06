@@ -39,45 +39,12 @@
 #include <pcl_ros/transforms.h>
 #include <pcl_ros/impl/transforms.hpp>
 
+typedef pcl::PointCloud<pcl::PointXYZ> PCL;
 typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, sensor_msgs::PointCloud2> SyncPolicy;
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_output(new pcl::PointCloud<pcl::PointXYZ>);
+PCL::Ptr pcl_output(new PCL);
 const bool rgb_to_gray = true;
-
-struct PclMsg
-{
-	std_msgs::Header header;
-	uint32_t height;
-	uint32_t width;
-	std::vector<sensor_msgs::PointField> fields;
-	bool is_bigendian;
-	uint32_t point_step;
-	uint32_t  row_step;
-	std::vector<uint8_t> data;
-	bool is_dense;
-};
-
-struct CompressedImageMsg
-{
-	std_msgs::Header header;
-	std::string format;
-	std::vector<uint8_t> data;
-};	
-
-struct CameraInfoMsg
-{
-	std_msgs::Header header;
-	uint32_t height;
-	uint32_t width;
-	std::string distortion_model;
-	std::vector<double> D;
-	boost::array<double, 9> K;
-	boost::array<double, 9> R;
-	boost::array<double, 12> P;
-	uint32_t binning_x;
-	uint32_t binning_y;
-	sensor_msgs::RegionOfInterest roi;
-};
+const float leaf_size = 0.05;
 
 class Fuser
 {
@@ -97,6 +64,9 @@ class Fuser
 			fused_image_pub_ = nh->advertise<sensor_msgs::Image>("early_fused_input", 1);
 			final_pcl_pub_ = nh->advertise<sensor_msgs::PointCloud2>("final_pcl", 1);
 			cv::Mat black_image_(cv::Size(1440,1080), CV_8UC1); // @TODO: solve hardcoded width and height
+
+			// Initialize empty pointcloud
+			last_filtered_pcl_ = boost::make_shared<PCL>();
 
 			// Load ros params
 			nh->getParam("pcl_data_topic", pcl_data_topic_);
@@ -130,7 +100,7 @@ class Fuser
 			else
 			{
 				pcl_sub_ = nh->subscribe(pcl_data_topic_, 1000, &Fuser::cb_pcl, this);
-				sensor_msgs::PointCloud2ConstPtr pcl_first_msg = ros::topic::waitForMessage<sensor_msgs::PointCloud2>(pcl_data_topic_);
+				sensor_msgs::PointCloud2 pcl_first_msg = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>(pcl_data_topic_));
 
 				thermal_sub_ = nh->subscribe(thermal_data_topic_, 1000, &Fuser::cb_thermal, this);
 				sensor_msgs::CompressedImage thermal_first_msg = *(ros::topic::waitForMessage<sensor_msgs::CompressedImage>(thermal_data_topic_));
@@ -143,80 +113,45 @@ class Fuser
 		void cb_pcl(const sensor_msgs::PointCloud2::ConstPtr &pcl_msg)
 		{
 			ROS_INFO("Pcl arrived");
-			last_pcl_.header = pcl_msg->header;
-			last_pcl_.height = pcl_msg->height;
-			last_pcl_.width = pcl_msg->width;
-			last_pcl_.fields = pcl_msg->fields;
-			last_pcl_.is_bigendian = pcl_msg->is_bigendian;
-			last_pcl_.point_step = pcl_msg->point_step;
-			last_pcl_.row_step = pcl_msg->row_step;
-			last_pcl_.data = pcl_msg->data;
-			last_pcl_.is_dense = pcl_msg->is_dense;
+			last_pcl_ = *pcl_msg;
 		}
 		
 		void cb_thermal(const sensor_msgs::CompressedImage::ConstPtr &thermal_msg)
 		{
 			ROS_INFO("Thermal arrived");
-			last_thermal_.header = thermal_msg->header;
-			last_thermal_.format = thermal_msg->format;
-			last_thermal_.data = thermal_msg->data;
+			last_thermal_ = *thermal_msg;
 		}
 		
 		void cb_rgb(const sensor_msgs::CompressedImage::ConstPtr &rgb_msg)
 		{
 			ROS_INFO("Rgb arrived");
-			last_rgb_.header = rgb_msg->header;
-			last_rgb_.format = rgb_msg->format;
-			last_rgb_.data = rgb_msg->data;
+			last_rgb_ = *rgb_msg;
 		}
 
 		void cb_sensors(const sensor_msgs::CompressedImage::ConstPtr& rgb_msg, const sensor_msgs::CompressedImage::ConstPtr& thermal_msg, const sensor_msgs::PointCloud2::ConstPtr& pcl_msg)
 		{
 			ROS_INFO("Synchronized sensor data arrived");
-			last_rgb_.header = rgb_msg->header;
-			last_rgb_.format = rgb_msg->format;
-			last_rgb_.data = rgb_msg->data;
-
-			last_thermal_.header = thermal_msg->header;
-			last_thermal_.format = thermal_msg->format;
-			last_thermal_.data = thermal_msg->data;
-
-			last_pcl_.header = pcl_msg->header;
-			last_pcl_.height = pcl_msg->height;
-			last_pcl_.width = pcl_msg->width;
-			last_pcl_.fields = pcl_msg->fields;
-			last_pcl_.is_bigendian = pcl_msg->is_bigendian;
-			last_pcl_.point_step = pcl_msg->point_step;
-			last_pcl_.row_step = pcl_msg->row_step;
-			last_pcl_.data = pcl_msg->data;
-			last_pcl_.is_dense = pcl_msg->is_dense;
+			last_thermal_ = *thermal_msg;
+			last_rgb_ = *rgb_msg;
+			last_pcl_ = *pcl_msg;
 		}
 		
 		void fuse()
 		{
 			ROS_INFO(">> Fusing");
-
-			// Get data from last iteration
 			/// @brief header
 			std_msgs::Header msg_header = last_rgb_.header;
 			/// @brief frame id
 			std::string frame_id = msg_header.frame_id.c_str();
 			/// @brief image data
-			sensor_msgs::CompressedImage rgb_msg, thermal_msg;
-			rgb_msg.header = last_rgb_.header;
-			rgb_msg.format = last_rgb_.format;
-			rgb_msg.data = last_rgb_.data;
-			thermal_msg.header = last_thermal_.header;
-			thermal_msg.format = last_thermal_.format;
-			thermal_msg.data = last_thermal_.data;
 			cv_bridge::CvImagePtr rgb_image_ptr;
 			cv_bridge::CvImagePtr thermal_image_ptr;
 
 			// 1. Save image rgb message
 			try
 			{
-				if (rgb_to_gray) rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::MONO8);
-				else rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::RGB8);
+				if (rgb_to_gray) rgb_image_ptr = cv_bridge::toCvCopy(last_rgb_, sensor_msgs::image_encodings::MONO8);
+				else rgb_image_ptr = cv_bridge::toCvCopy(last_rgb_, sensor_msgs::image_encodings::RGB8);
 			}
 			catch (cv::Exception &e)
 			{
@@ -226,7 +161,7 @@ class Fuser
 			// 2. Save image thermal message
 			try
 			{
-				thermal_image_ptr = cv_bridge::toCvCopy(thermal_msg, sensor_msgs::image_encodings::MONO8);
+				thermal_image_ptr = cv_bridge::toCvCopy(last_thermal_, sensor_msgs::image_encodings::MONO8);
 			}
 			catch (cv::Exception &e)
 			{
@@ -239,15 +174,16 @@ class Fuser
 			cv::Size desired_size(1440, 1080);
 
 			// UNDISTORT + RECTIFY (visual)
+
 			cv::Mat rm1, rm2;
-			cv::initUndistortRectifyMap(K_rgb_, D_rgb_, R_rgb_, K_rgb_, cv::Size(cam_info_rgb_.width, cam_info_rgb_.height), CV_32FC1, rm1, rm2);
+			cv::initUndistortRectifyMap(K_rgb_, D_rgb_, R_rgb_, K_rgb_, cv::Size(info_rgb_.width, info_rgb_.height), CV_32FC1, rm1, rm2);
 			cv::remap(rgb_image_ptr->image, rgb_image_ptr->image, rm1, rm2, cv::INTER_LINEAR);
 
 			/* THERMAL */
 			// UNDISTORT + RECTIFY
 			rm1.release();
 			rm2.release();
-			cv::initUndistortRectifyMap(K_rgb_, D_rgb_, R_rgb_, K_rgb_, cv::Size(cam_info_thermal_.width, cam_info_thermal_.height), CV_32FC1, rm1, rm2);
+			cv::initUndistortRectifyMap(K_rgb_, D_rgb_, R_rgb_, K_rgb_, cv::Size(info_thermal_.width, info_thermal_.height), CV_32FC1, rm1, rm2);
 			cv::remap(thermal_image_ptr->image, thermal_image_ptr->image, rm1, rm2, cv::INTER_LINEAR);
 			
 			// PAINT (flir water mark)
@@ -256,11 +192,6 @@ class Fuser
 			// RESIZE (thermal) to rgb size
 			cv::resize(thermal_image_ptr->image, thermal_image_ptr->image, rgb_image_ptr->image.size());
 
-			// cv::namedWindow("visual", cv::WINDOW_NORMAL);
-			// cv::resizeWindow("visual", 640, 480);
-			// cv::imshow("visual", rgb_image_ptr->image);
-			// cv::waitKey(3);
-
 			// AFFINE (align thermal with rgb)
 			//cv::warpAffine(thermal_image_ptr->image, thermal_image_ptr->image, translation_thermal_, thermal_image_ptr->image.size());
 			//cv::namedWindow("thermal_affine", cv::WINDOW_NORMAL);
@@ -268,44 +199,31 @@ class Fuser
 			//cv::imshow("thermal_affine", thermal_image_ptr->image);
 
 			/* Point Cloud */
-			// Container for original & filtered data
-			pcl::PCLPointCloud2 *cloud = new pcl::PCLPointCloud2;
-			pcl::PCLPointCloud2ConstPtr cloud_ptr(cloud);
-			pcl::PCLPointCloud2 cloud_filtered;
+			/// @brief Containers for original & filtered point cloud data
+			pcl::PCLPointCloud2* original_pcl = new pcl::PCLPointCloud2;
+			pcl::PCLPointCloud2ConstPtr original_pcl_const_ptr(original_pcl);
+			pcl::PCLPointCloud2 filtered_pcl;
 
-			// Convert to PCL data type
-			sensor_msgs::PointCloud2 pcl_msg;
-			pcl_msg.header = last_pcl_.header;
-			pcl_msg.height = last_pcl_.height;
-			pcl_msg.width = last_pcl_.width;
-			pcl_msg.fields = last_pcl_.fields;
-			pcl_msg.is_bigendian = last_pcl_.is_bigendian;
-			pcl_msg.point_step = last_pcl_.point_step;
-			pcl_msg.row_step = last_pcl_.row_step;
-			pcl_msg.data = last_pcl_.data;
-			pcl_msg.is_dense = last_pcl_.is_dense;
-			pcl_conversions::toPCL(pcl_msg, *cloud);
+			/// @brief Get last pcl message data and convert it to pcl native
+			pcl_conversions::toPCL(last_pcl_, *original_pcl);
 			
-			// Downsample the point cloud
-			pcl::VoxelGrid<pcl::PCLPointCloud2> sor;
-			sor.setInputCloud(cloud_ptr);
-			sor.setLeafSize(0.05, 0.05, 0.05);
-			sor.filter(cloud_filtered);	
+			/// @brief Downsample the point cloud
+			pcl::VoxelGrid<pcl::PCLPointCloud2> grid;
+			grid.setInputCloud(original_pcl_const_ptr);
+			grid.setLeafSize(leaf_size, leaf_size, leaf_size);
+			grid.filter(filtered_pcl);
 
-			// Convert to ROS data type
-			pcl::fromPCLPointCloud2(cloud_filtered, *pcl_output);
+			/// @brief convert PCLPointCloud2 to pcl::PCLPointCloud<PointXYZ>
+			pcl::fromPCLPointCloud2(filtered_pcl, *last_filtered_pcl_);
 			
-			// Perform cropping
+			/// @brief Crop pointcloud
 			pcl::CropBox<pcl::PointXYZ> crop;
-			crop.setInputCloud(pcl_output);
+			crop.setInputCloud(last_filtered_pcl_);
 			crop.setMin(Eigen::Vector4f(-2.0, 0, -2.0, 1.0));
 			crop.setMax(Eigen::Vector4f(2.0, max_range_, 2.0, 1.0));
-			//crop.setMin(Eigen::Vector4f(-1.5, 0, -1.5, 1.0));
-			//crop.setMax(Eigen::Vector4f(1.5, max_range_, 1.5, 1.0));
-			crop.filter(*pcl_output);
+			crop.filter(*last_filtered_pcl_);
 
-			// Publish resulting point cloud
-			// Apply TF
+			// Get transform from lidar to the camera frame
 			try
 			{
 				tf_listener_.lookupTransform("/os_sensor", "/camera_frame", ros::Time(0), lidar2cam_tf_);
@@ -314,33 +232,20 @@ class Fuser
 			{
 		    	ROS_WARN("%s",ex.what());
     		}
-			pcl_ros::transformPointCloud(*pcl_output, *pcl_output, lidar2cam_tf_);
+			/// @brief Transform point cloud frame to camera frame
+			pcl_ros::transformPointCloud(*last_filtered_pcl_, *last_filtered_pcl_, lidar2cam_tf_);
 
-			// Publish final point cloud for visualization
-			sensor_msgs::PointCloud2 final_pcl_msg;
-			pcl::toROSMsg(*pcl_output.get(), final_pcl_msg);
-			final_pcl_pub_.publish(final_pcl_msg);
+			/// @brief Publish final point cloud for visualization
+			sensor_msgs::PointCloud2 filtered_pcl_msg;
+			pcl::toROSMsg(*last_filtered_pcl_.get(), filtered_pcl_msg);
+			final_pcl_pub_.publish(filtered_pcl_msg);
 
-			// Points
+			/* Transform pointcloud to 2D grayscale image */
 			cv::Point3d points3D;
 			cv::Point2d points2D;
 			cv::Point pixels;
-			
-			// Create camera info message
-			sensor_msgs::CameraInfo cam_info_msg;
 			image_geometry::PinholeCameraModel camera_geometry;
-			cam_info_msg.header = cam_info_rgb_.header;
-			cam_info_msg.width = cam_info_rgb_.width;
-			cam_info_msg.height = cam_info_rgb_.height;
-			cam_info_msg.distortion_model = cam_info_rgb_.distortion_model;
-			cam_info_msg.D = cam_info_rgb_.D;
-			cam_info_msg.K = cam_info_rgb_.K;
-			cam_info_msg.R = cam_info_rgb_.R;
-			cam_info_msg.P = cam_info_rgb_.P;
-			cam_info_msg.binning_x = cam_info_rgb_.binning_x;
-			cam_info_msg.binning_y = cam_info_rgb_.binning_y;
-			cam_info_msg.roi = cam_info_rgb_.roi;
-			camera_geometry.fromCameraInfo(cam_info_msg);
+			camera_geometry.fromCameraInfo(info_rgb_);
 
 			// Auxiliar variables
 			int pointscount = 0;
@@ -349,7 +254,7 @@ class Fuser
 			float u, v;
 			int color;
 			// Image of depths
-			cv::Mat lidar_image = cv::Mat::zeros(cv::Size(cam_info_rgb_.width, cam_info_rgb_.height), CV_8UC1);
+			cv::Mat lidar_image = cv::Mat::zeros(cv::Size(info_rgb_.width, info_rgb_.height), CV_8UC1);
 			for (pcl::PointXYZ point : pcl_output->points)
 			{
 				points3D.x = point.y; // xcam = zlaser
@@ -365,7 +270,7 @@ class Fuser
 				points2D.x = (int)u;
 				points2D.y = (int)v;
 
-				if (points2D.x > 0 && points2D.x < cam_info_rgb_.width && points2D.y > 0 && points2D.y < cam_info_rgb_.height)
+				if (points2D.x > 0 && points2D.x < info_rgb_.width && points2D.y > 0 && points2D.y < info_rgb_.height)
 				{
 					// Saturate depth
 					if(depth >= max_range_) depth = max_range_;
@@ -469,62 +374,50 @@ class Fuser
 		void load_cameras_info()
 		{
 			ROS_INFO("Loading Camera info...");
-			sensor_msgs::CameraInfoConstPtr info_rgb = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(rgb_info_topic_, ros::Duration(2));
-			sensor_msgs::CameraInfoConstPtr info_thermal = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(thermal_info_topic_, ros::Duration(2));
-
-			if (info_rgb == nullptr) 
+			sensor_msgs::CameraInfoConstPtr info_rgb_ptr = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(rgb_info_topic_, ros::Duration(20));
+			sensor_msgs::CameraInfoConstPtr info_thermal_ptr = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(thermal_info_topic_, ros::Duration(20));
+			if (info_rgb_ptr == nullptr) 
 			{
-				ROS_ERROR("No RGB camera info. Quitting...\n");
+				ROS_ERROR("Timeout. No RGB camera info. Quitting...\n");
 				ros::shutdown();
 			}
-			if (info_thermal == nullptr) 
+			if (info_thermal_ptr == nullptr) 
 			{
-				ROS_ERROR("No thermal camera info. Quitting...\n");
+				ROS_ERROR("Timeout. No thermal camera info. Quitting...\n");
 				ros::shutdown();
 			}
+			info_rgb_ = *info_rgb_ptr;
+			info_thermal_ = *info_thermal_ptr;
 
 			// RGB
-			cam_info_rgb_.header = info_rgb->header;
-			cam_info_rgb_.height = info_rgb->height;
-			cam_info_rgb_.width = info_rgb->width;
-			cam_info_rgb_.distortion_model = info_rgb->distortion_model;
-			cam_info_rgb_.D = {-0.5138254596294459, 0.44290503681520377, 0.0020747506912668404, 0.0011692118540784398, -0.3681143872182688};
-			cam_info_rgb_.K = {1743.4035352713363, 0.0, 760.3723854064434, 0.0, 1739.4423246973906, 595.5405415362117, 0.0, 0.0, 1.0};	
-			cam_info_rgb_.R = {1,0,0,0,1,0,0,0,1};
-			cam_info_rgb_.P = {1743.4035352713363, 0.0, 760.3723854064434, 0.0,
+			info_rgb_.D = {-0.5138254596294459, 0.44290503681520377, 0.0020747506912668404, 0.0011692118540784398, -0.3681143872182688};
+			info_rgb_.K = {1743.4035352713363, 0.0, 760.3723854064434, 0.0, 1739.4423246973906, 595.5405415362117, 0.0, 0.0, 1.0};	
+			info_rgb_.R = {1,0,0,0,1,0,0,0,1};
+			info_rgb_.P = {1743.4035352713363, 0.0, 760.3723854064434, 0.0,
 				0.0, 1739.4423246973906, 595.5405415362117, 0.0,
 				0.0, 0.0, 1.0, 0.0};
-			cam_info_rgb_.binning_x = info_rgb->binning_x;
-			cam_info_rgb_.binning_y = info_rgb->binning_y;
-			cam_info_rgb_.roi = info_rgb->roi;
-			K_rgb_ = cv::Mat(3, 3, CV_64F, &cam_info_rgb_.K[0]);
-			D_rgb_ = cv::Mat(5, 1, CV_64F, &cam_info_rgb_.D[0]);
-			R_rgb_ = cv::Mat(3, 3, CV_64F, &cam_info_rgb_.R[0]);
+			K_rgb_ = cv::Mat(3, 3, CV_64F, &info_rgb_.K[0]);
+			D_rgb_ = cv::Mat(5, 1, CV_64F, &info_rgb_.D[0]);
+			R_rgb_ = cv::Mat(3, 3, CV_64F, &info_rgb_.R[0]);
 
 			// Thermal
-			cam_info_thermal_.header = info_thermal->header;
-			cam_info_thermal_.height = info_thermal->height;
-			cam_info_thermal_.width = info_thermal->width;
-			cam_info_thermal_.distortion_model = info_thermal->distortion_model;
-			cam_info_thermal_.D = {-8.7955719162052803e-03, 2.7957338512854757e-01, 2.9514273519729906e-03, -7.8091815268012512e-03, -1.0969845111284882e+00};
-			cam_info_thermal_.K = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.,7.3675903031957341e+02,2.5406537636242152e+02,0.,0.,1.};	
-			cam_info_thermal_.R = {1,0,0,0,1,0,0,0,1};
-			cam_info_thermal_.P = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.0, 
+			info_thermal_.D = {-8.7955719162052803e-03, 2.7957338512854757e-01, 2.9514273519729906e-03, -7.8091815268012512e-03, -1.0969845111284882e+00};
+			info_thermal_.K = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.,7.3675903031957341e+02,2.5406537636242152e+02,0.,0.,1.};	
+			info_thermal_.R = {1,0,0,0,1,0,0,0,1};
+			info_thermal_.P = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.0, 
 				0.,7.3675903031957341e+02,2.5406537636242152e+02, 0.0,
 				0.,0.,1.,0.};
-			cam_info_thermal_.binning_x = info_thermal->binning_x;
-			cam_info_thermal_.binning_y = info_thermal->binning_y;
-			cam_info_thermal_.roi = info_thermal->roi;
-			K_thermal_ = cv::Mat(3, 3, CV_64F, &cam_info_thermal_.K[0]);
-			D_thermal_ = cv::Mat(5, 1, CV_64F, &cam_info_thermal_.D[0]);
-			R_thermal_ = cv::Mat(3, 3, CV_64F, &cam_info_thermal_.R[0]);
+			K_thermal_ = cv::Mat(3, 3, CV_64F, &info_thermal_.K[0]);
+			D_thermal_ = cv::Mat(5, 1, CV_64F, &info_thermal_.D[0]);
+			R_thermal_ = cv::Mat(3, 3, CV_64F, &info_thermal_.R[0]);
 		}
 	private:
-		PclMsg last_pcl_;
-		CompressedImageMsg last_thermal_;
-		CompressedImageMsg last_rgb_;
-		CameraInfoMsg cam_info_rgb_;
-		CameraInfoMsg cam_info_thermal_;
+		PCL::Ptr last_filtered_pcl_;
+		sensor_msgs::PointCloud2 last_pcl_;
+		sensor_msgs::CompressedImage last_thermal_;
+		sensor_msgs::CompressedImage last_rgb_;
+		sensor_msgs::CameraInfo info_thermal_;
+		sensor_msgs::CameraInfo info_rgb_;
 		unsigned int num_frames_;
 		std::string im_format_dataset_;
 		std::string dataset_path_;
@@ -548,7 +441,7 @@ class Fuser
 		ros::Subscriber rgb_sub_;
 		std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> rgb_sub_sync_;
 		std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> thermal_sub_sync_;
-		std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> pcl_sub_sync_;
+		std::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> pcl_sub_sync_;
 		std::unique_ptr<message_filters::Synchronizer<SyncPolicy>> synchronizer_;
 		tf::TransformListener tf_listener_;
 		tf::StampedTransform lidar2cam_tf_;
