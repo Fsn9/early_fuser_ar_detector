@@ -174,7 +174,6 @@ class Fuser
 			cv::Size desired_size(1440, 1080);
 
 			// UNDISTORT + RECTIFY (visual)
-
 			cv::Mat rm1, rm2;
 			cv::initUndistortRectifyMap(K_rgb_, D_rgb_, R_rgb_, K_rgb_, cv::Size(info_rgb_.width, info_rgb_.height), CV_32FC1, rm1, rm2);
 			cv::remap(rgb_image_ptr->image, rgb_image_ptr->image, rm1, rm2, cv::INTER_LINEAR);
@@ -213,7 +212,7 @@ class Fuser
 			grid.setLeafSize(leaf_size, leaf_size, leaf_size);
 			grid.filter(filtered_pcl);
 
-			/// @brief convert PCLPointCloud2 to pcl::PCLPointCloud<PointXYZ>
+			/// @brief Convert PCLPointCloud2 to pcl::PCLPointCloud<PointXYZ>
 			pcl::fromPCLPointCloud2(filtered_pcl, *last_filtered_pcl_);
 			
 			/// @brief Crop pointcloud
@@ -243,16 +242,11 @@ class Fuser
 			/* Transform pointcloud to 2D grayscale image */
 			cv::Point3d points3D;
 			cv::Point2d points2D;
-			cv::Point pixels;
 			image_geometry::PinholeCameraModel camera_geometry;
 			camera_geometry.fromCameraInfo(info_rgb_);
-
-			// Auxiliar variables
-			int pointscount = 0;
-			int j = 0;
 			float depth;
 			float u, v;
-			int color;
+
 			// Image of depths
 			cv::Mat lidar_image = cv::Mat::zeros(cv::Size(info_rgb_.width, info_rgb_.height), CV_8UC1);
 			for (pcl::PointXYZ point : pcl_output->points)
@@ -261,30 +255,16 @@ class Fuser
 				points3D.y = point.z; // ycam = xlaser
 				points3D.z = point.x; // zcam = ylaser
 				depth = points3D.z; 
-				
-				// Project
-				//points2D = camera_geometry.project3dToPixel(points3D);
 
-				u = (camera_geometry.fx() * points3D.x / depth) + camera_geometry.cx();
-				v = (camera_geometry.fy() * points3D.y / depth) + camera_geometry.cy();
-				points2D.x = (int)u;
-				points2D.y = (int)v;
+				points2D = camera_geometry.project3dToPixel(points3D);				
 
 				if (points2D.x > 0 && points2D.x < info_rgb_.width && points2D.y > 0 && points2D.y < info_rgb_.height)
 				{
 					// Saturate depth
 					if(depth >= max_range_) depth = max_range_;
-
-					// Define colour between 0 and 255
-					color = 255 * (1.0 - depth / max_range_);
-
-					pointscount++;
-					//cv::circle(rgb_image_ptr->image, points2D, 0, cv::Scalar(color), 5);
-
 					// Draw pointcloud 2D image
-					lidar_image.at<uchar>((int)points2D.y, (int)points2D.x) = color;
+					lidar_image.at<uchar>((int)points2D.y, (int)points2D.x) = 255 * (1.0 - depth / max_range_);
 				}
-				j++;
 			}
 
 			//pcl::PointCloud::Ptr received_cloud_ptr;
@@ -305,8 +285,6 @@ class Fuser
 			//fused_image_bridge = cv_bridge::CvImage(fused_image_header, sensor_msgs::image_encodings::BGR8, lidar_image);
 			//fused_image_bridge.toImageMsg(image_msg);
 			//fused_image_pub.publish(image_msg);
-
-			//std::cout << "lidarpoints: " << pointscount << std::endl;
 			num_frames_++;
 
 			//cv::namedWindow("rgb_fused", cv::WINDOW_NORMAL);

@@ -44,6 +44,8 @@
     <!-- Launch bags-->
     <node pkg="rosbag" type="play" name="rosbag" output="screen" args="
     $(arg old_bags)/test_15.bag
+    $(arg old_bags)/test_16.bag
+    $(arg old_bags)/test_17.bag
     $(arg renamed_topics)
     --topics $(arg topics)
     --loop
