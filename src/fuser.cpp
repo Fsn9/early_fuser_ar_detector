@@ -42,7 +42,6 @@
 typedef pcl::PointCloud<pcl::PointXYZ> PCL;
 typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, sensor_msgs::PointCloud2> SyncPolicy;
 
-PCL::Ptr pcl_output(new PCL);
 const bool rgb_to_gray = true;
 const float leaf_size = 0.05;
 
@@ -53,8 +52,6 @@ class Fuser
 		{
 			nh_ = nh;
 			// Set parameters
-			dataset_path_ = "/home/fsn9/Desktop/presentation/";
-			im_format_dataset_ = ".bmp";
 			num_frames_ = 0;
 			max_range_ = 8.0;
 			tx_thermal_ = 50;
@@ -69,6 +66,8 @@ class Fuser
 			last_filtered_pcl_ = boost::make_shared<PCL>();
 
 			// Load ros params
+			nh->getParam("dataset_path", dataset_path_);
+			nh->getParam("dataset_img_format", im_format_dataset_);
 			nh->getParam("pcl_data_topic", pcl_data_topic_);
 			nh->getParam("thermal_data_topic", thermal_data_topic_);
 			nh->getParam("thermal_info_topic", thermal_info_topic_);
@@ -248,8 +247,8 @@ class Fuser
 			float u, v;
 
 			// Image of depths
-			cv::Mat lidar_image = cv::Mat::zeros(cv::Size(info_rgb_.width, info_rgb_.height), CV_8UC1);
-			for (pcl::PointXYZ point : pcl_output->points)
+			cv::Mat pcl_image = cv::Mat::zeros(cv::Size(info_rgb_.width, info_rgb_.height), CV_8UC1);
+			for (pcl::PointXYZ point : last_filtered_pcl_->points)
 			{
 				points3D.x = point.y; // xcam = zlaser
 				points3D.y = point.z; // ycam = xlaser
@@ -263,62 +262,29 @@ class Fuser
 					// Saturate depth
 					if(depth >= max_range_) depth = max_range_;
 					// Draw pointcloud 2D image
-					lidar_image.at<uchar>((int)points2D.y, (int)points2D.x) = 255 * (1.0 - depth / max_range_);
+					pcl_image.at<uchar>((int)points2D.y, (int)points2D.x) = 255 * (1.0 - depth / max_range_);
 				}
 			}
-
-			//pcl::PointCloud::Ptr received_cloud_ptr;
-			//received_cloud_ptr.reset(new pcl::PointCloud);
-			//sensor_msgs::PointCloud2ConstPtr pointcloud_msg;
-			//pcl::fromROSMsg(*pointcloud_msg.get(), *received_cloud_ptr.get());
 
 			// Make depthmap message
 			std_msgs::Header fused_image_header;
 			fused_image_header.seq = num_frames_;
 			fused_image_header.stamp = msg_header.stamp;
 
-			// Make final image message
-			sensor_msgs::Image image_msg;
-			// o 32FC3 nao vai de 0 a 255. sao floats tipo pontos xyz
-			// mudar para bgr8 ou rgb8
-			//fused_image_bridge = cv_bridge::CvImage(fused_image_header, sensor_msgs::image_encodings::TYPE_32FC3, lidar_image);
-			//fused_image_bridge = cv_bridge::CvImage(fused_image_header, sensor_msgs::image_encodings::BGR8, lidar_image);
-			//fused_image_bridge.toImageMsg(image_msg);
-			//fused_image_pub.publish(image_msg);
-			num_frames_++;
-
-			//cv::namedWindow("rgb_fused", cv::WINDOW_NORMAL);
-			//cv::resizeWindow("rgb_fused", 640, 480);
-			//cv::imshow("rgb_fused", rgb_image_ptr->image);
-
-			//rgb_image_ptr->image.convertTo(rgb_image_ptr->image, CV_32FC1, 1.0 / 255.0);
-			//lidar_image.convertTo(lidar_image, CV_32FC1, 1.0 / 255.0);
-
-			//cv::namedWindow("depth_map", cv::WINDOW_NORMAL);
-			//cv::resizeWindow("depth_map", 640, 480);
-			//cv::imshow("depth_map", lidar_image);
-			//cv::waitKey(3);
-
 			// Dilate depth map
-			cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(11,11));
-			cv::dilate(lidar_image, lidar_image, kernel);
+			cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(20,20));
+			cv::dilate(pcl_image, pcl_image, kernel);
 
 			// Concatenate images
 			cv::Mat input;
 			std::vector<cv::Mat> channels;
-			cv::Mat black_image_(cv::Size(1440,1080), CV_8UC1);
-			black_image_ = 0; 
-			//channels.push_back(black_image_);
+			//black_image_ = 0; 
 			channels.push_back(rgb_image_ptr->image);
-			//channels.push_back(black_image_);
-			//channels.push_back(black_image_);
 			channels.push_back(thermal_image_ptr->image);
-			//channels.push_back(black_image_);
-			//channels.push_back(lidar_image);
-			channels.push_back(black_image_);
-			//channels.push_back(black_image_);
+			channels.push_back(pcl_image);
 
-			try{
+			try
+			{
 				cv::merge(channels, input);
 			}
 			catch (cv::Exception &e)
@@ -328,32 +294,25 @@ class Fuser
 			}
 
 			// Publish fused inputs
+			sensor_msgs::Image image_msg;
 			cv_bridge::CvImage fused_image_bridge = cv_bridge::CvImage(fused_image_header, sensor_msgs::image_encodings::BGR8, input);
 			fused_image_bridge.toImageMsg(image_msg);
 			fused_image_pub_.publish(image_msg);
 
-			/*
-			cv::namedWindow("input", cv::WINDOW_NORMAL);
-			cv::resizeWindow("input", 640, 480);
-			cv::imshow("input", input);
-			cv::waitKey(3);
-			*/
 			// Save images
-			/*
-			cv::imwrite(dataset_path + "im_visual_" + std::to_string(num_frames_) + im_format_dataset_, true_rgb_image_ptr->image);
-			cv::imwrite(dataset_path + "im_thermal_" + std::to_string(num_frames_) + im_format_dataset_, thermal_image_ptr->image);
-			cv::imwrite(dataset_path + "im_lidar_" + std::to_string(num_frames_) + im_format_dataset_, lidar_image);
-			cv::imwrite(dataset_path + "im_input_" + std::to_string(num_frames_) + im_format_dataset_, input);
-			std::cout << "PATH: " << dataset_path + "im_" + std::to_string(num_frames_) + im_format_dataset_ << "\n";	
-			*/
-			// Data augment
+			cv::imwrite(dataset_path_ + "im_visual_" + std::to_string(num_frames_) + im_format_dataset_, rgb_image_ptr->image);
+			cv::imwrite(dataset_path_ + "im_thermal_" + std::to_string(num_frames_) + im_format_dataset_, thermal_image_ptr->image);
+			cv::imwrite(dataset_path_ + "im_lidar_" + std::to_string(num_frames_) + im_format_dataset_, pcl_image);
+			cv::imwrite(dataset_path_ + "im_input_" + std::to_string(num_frames_) + im_format_dataset_, input);
+			std::cout << "PATH: " << dataset_path_ + "im_" + std::to_string(num_frames_) + im_format_dataset_ << "\n";	
+			num_frames_++;
 		}
 		
 		void load_cameras_info()
 		{
 			ROS_INFO("Loading Camera info...");
-			sensor_msgs::CameraInfoConstPtr info_rgb_ptr = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(rgb_info_topic_, ros::Duration(20));
-			sensor_msgs::CameraInfoConstPtr info_thermal_ptr = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(thermal_info_topic_, ros::Duration(20));
+			sensor_msgs::CameraInfoConstPtr info_rgb_ptr = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(rgb_info_topic_);
+			sensor_msgs::CameraInfoConstPtr info_thermal_ptr = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(thermal_info_topic_);
 			if (info_rgb_ptr == nullptr) 
 			{
 				ROS_ERROR("Timeout. No RGB camera info. Quitting...\n");

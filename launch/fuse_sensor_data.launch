@@ -4,7 +4,7 @@
     <arg name="bag_path" default="$(find platform_detector)/bags"/>
     <arg name="old_bags" default="$(arg bag_path)/old"/>
     <arg name="14_07_bags" default="$(arg bag_path)/14_07_2022"/>
-    <arg name="15_03_bags" default="$(arg bag_path)/15_03_2022-Landing_ArTuga"/>
+    <arg name="15_03_bags" default="$(arg bag_path)/15_03_2022-FADEUP"/>
     <arg name="20_07_bags" default="$(arg bag_path)/20-21-22_07_2022"/>
     <arg name="all_bags" default="*.bag"/>
     <arg name="namespace" value=""/>
@@ -12,7 +12,9 @@
     <!-- Params -->
     <param name="namespace" value="$(arg namespace)"/>
     <param name="use_sim_time" value="true" />
-    <param name="sync_sensors" value="false"/>
+    <param name="sync_sensors" value="true"/>
+    <param name="dataset_path" value="$(find platform_detector)/datasets/dummy/"/>
+    <param name="dataset_img_format" value=".bmp"/>
     
     <!-- Variable args-->
     <!-- if namespace is needed put the namespace in topic names-->
@@ -43,12 +45,10 @@
 
     <!-- Launch bags-->
     <node pkg="rosbag" type="play" name="rosbag" output="screen" args="
-    $(arg old_bags)/test_15.bag
     $(arg old_bags)/test_16.bag
     $(arg old_bags)/test_17.bag
     $(arg renamed_topics)
     --topics $(arg topics)
-    --loop
     --rate $(arg bag_freq)
     --clock
     "/>
