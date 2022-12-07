@@ -45,6 +45,19 @@ typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedI
 const bool rgb_to_gray = true;
 const float leaf_size = 0.05;
 
+std::string datetime()
+{
+    time_t rawtime;
+    struct tm * timeinfo;
+    char buffer[80];
+
+    time (&rawtime);
+    timeinfo = localtime(&rawtime);
+
+    strftime(buffer,80,"%d-%m-%Y %H-%M-%S",timeinfo);
+    return std::string(buffer);
+}
+
 class Fuser
 {
 	public:
@@ -60,13 +73,13 @@ class Fuser
 			cv::Mat translation_thermal_(2, 3, CV_32F, warp_values);
 			concatenated_input_pub_ = nh->advertise<sensor_msgs::Image>("early_fused_input", 1);
 			final_pcl_pub_ = nh->advertise<sensor_msgs::PointCloud2>("final_pcl", 1);
-			cv::Mat black_image_(cv::Size(1440,1080), CV_8UC1); // @TODO: solve hardcoded width and height
+			black_image_ = cv::Mat::zeros(cv::Size(1440,1080), CV_8UC1); // @TODO: solve hardcoded width and height
 
-			// Initialize empty pointcloud
+			// Initialize empty container for filtered pointcloud
 			last_filtered_pcl_ = boost::make_shared<PCL>();
 
 			// Load ros params
-			nh->getParam("dataset_path", dataset_path_);
+			nh->getParam("dataset_main_dir", dataset_main_dir_);
 			nh->getParam("dataset_img_format", im_format_dataset_);
 			nh->getParam("pcl_data_topic", pcl_data_topic_);
 			nh->getParam("thermal_data_topic", thermal_data_topic_);
@@ -74,7 +87,38 @@ class Fuser
 			nh->getParam("rgb_data_topic", rgb_data_topic_);
 			nh->getParam("rgb_info_topic", rgb_info_topic_);
 			nh->getParam("sync_sensors", sync_sensors_);
-			
+
+			// Create datasets folders for all combination of inputs
+			std::string timestamp = datetime();
+
+			datasets_dirs_["complete"] = dataset_main_dir_ + datetime() + "_dataset_complete_input/";
+			if (mkdir(datasets_dirs_["complete"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
+			else std::cout << "Directory " + datasets_dirs_["complete"] + "created";
+
+			datasets_dirs_["visual"] = dataset_main_dir_ + datetime() + "_dataset_visual_input/";
+			if (mkdir(datasets_dirs_["visual"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
+			else std::cout << "Directory " + datasets_dirs_["visual"] + "created";
+
+			datasets_dirs_["thermal"] = dataset_main_dir_ + datetime() + "_dataset_thermal_input/";
+			if (mkdir(datasets_dirs_["thermal"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
+			else std::cout << "Directory " + datasets_dirs_["thermal"] + "created";
+
+			datasets_dirs_["pcl"] = dataset_main_dir_ + datetime() + "_dataset_pcl_input/";
+			if (mkdir(datasets_dirs_["pcl"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
+			else std::cout << "Directory " + datasets_dirs_["pcl"] + "created";
+
+			datasets_dirs_["visual_thermal"] = dataset_main_dir_ + datetime() + "_dataset_visual_thermal_input/";
+			if (mkdir(datasets_dirs_["visual_thermal"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
+			else std::cout << "Directory " + datasets_dirs_["visual_thermal"] + "created";
+
+			datasets_dirs_["visual_pcl"] = dataset_main_dir_ + datetime() + "_dataset_visual_pcl_input/";
+			if (mkdir(datasets_dirs_["visual_pcl"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
+			else std::cout << "Directory " + datasets_dirs_["visual_pcl"] + "created";
+
+			datasets_dirs_["thermal_pcl"] = dataset_main_dir_ + datetime() + "_dataset_thermal_pcl_input/";
+			if (mkdir(datasets_dirs_["thermal_pcl"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
+			else std::cout << "Directory " + datasets_dirs_["thermal_pcl"] + "created";
+
 			// Load camera infos
 			load_cameras_info();
 
@@ -265,8 +309,21 @@ class Fuser
 			cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(20,20));
 			cv::dilate(pcl_image, pcl_image, kernel);
 
-			// Concatenate images
-			cv::Mat concatenated_input = generate_dataset_sample(rgb_image_ptr->image, thermal_image_ptr->image, pcl_image);
+			/// @brief Generate datasets for all configuration of inputs
+			// all inputs
+			cv::Mat concatenated_input = generate_dataset_sample(rgb_image_ptr->image, thermal_image_ptr->image, pcl_image, datasets_dirs_["complete"]);
+			// visual only
+			generate_dataset_sample(rgb_image_ptr->image, black_image_, black_image_, datasets_dirs_["visual"]);
+			// thermal only
+			generate_dataset_sample(black_image_, thermal_image_ptr->image, black_image_, datasets_dirs_["thermal"]);
+			// pcl only
+			generate_dataset_sample(black_image_, black_image_, pcl_image, datasets_dirs_["pcl"]);
+			// visual + thermal
+			generate_dataset_sample(rgb_image_ptr->image, thermal_image_ptr->image, black_image_, datasets_dirs_["visual_thermal"]);
+			// thermal + pcl
+			generate_dataset_sample(black_image_, thermal_image_ptr->image, pcl_image, datasets_dirs_["thermal_pcl"]);
+			// visual + pcl
+			generate_dataset_sample(rgb_image_ptr->image, black_image_, pcl_image, datasets_dirs_["visual_pcl"]);
 
 			/// @brief Publish concatenated input
 			/// Define header
@@ -278,20 +335,30 @@ class Fuser
 			num_frames_++;
 		}
 		
-		cv::Mat generate_dataset_sample(cv::Mat visual_channel, cv::Mat thermal_channel, cv::Mat pcl_channel)
+		cv::Mat generate_dataset_sample(cv::Mat visual_channel, cv::Mat thermal_channel, cv::Mat pcl_channel, std::string dataset_folder_path)
 		{
 			cv::Mat output_image;
 			std::vector<cv::Mat> channels;
+			if (cv::countNonZero(visual_channel) < 1) channels.push_back(black_image_);
+			else 
+			{
+				channels.push_back(visual_channel);
+				cv::imwrite(dataset_folder_path + "im_visual_" + std::to_string(num_frames_) + im_format_dataset_, visual_channel);
+			}
+			if (cv::countNonZero(thermal_channel) < 1) channels.push_back(black_image_);
+			else
+			{
+				channels.push_back(thermal_channel);
+				cv::imwrite(dataset_folder_path + "im_thermal_" + std::to_string(num_frames_) + im_format_dataset_, thermal_channel);
+			} 
+			if (cv::countNonZero(pcl_channel) < 1) channels.push_back(black_image_);
+			else 
+			{
+				channels.push_back(pcl_channel);
+				cv::imwrite(dataset_folder_path + "im_lidar_" + std::to_string(num_frames_) + im_format_dataset_, pcl_channel);
+			}
 
-			if (visual_channel.empty()) channels.push_back(black_image_);
-			else channels.push_back(visual_channel);
-
-			if (thermal_channel.empty()) channels.push_back(black_image_);
-			else channels.push_back(thermal_channel);
-
-			if (pcl_channel.empty()) channels.push_back(black_image_);
-			else channels.push_back(pcl_channel);
-
+			/// @brief Concatenate
 			try
 			{
 				cv::merge(channels, output_image);
@@ -303,11 +370,8 @@ class Fuser
 			}
 			
 			/// @brief Save images
-			cv::imwrite(dataset_path_ + "im_visual_" + std::to_string(num_frames_) + im_format_dataset_, visual_channel);
-			cv::imwrite(dataset_path_ + "im_thermal_" + std::to_string(num_frames_) + im_format_dataset_, thermal_channel);
-			cv::imwrite(dataset_path_ + "im_lidar_" + std::to_string(num_frames_) + im_format_dataset_, pcl_channel);
-			cv::imwrite(dataset_path_ + "im_concat_" + std::to_string(num_frames_) + im_format_dataset_, output_image);
-			std::cout << "PATH: " << dataset_path_ + "im_" + std::to_string(num_frames_) + im_format_dataset_ << "\n";	
+			cv::imwrite(dataset_folder_path + "im_concat_" + std::to_string(num_frames_) + im_format_dataset_, output_image);
+			std::cout << "PATH: " << dataset_main_dir_ + "im_" + std::to_string(num_frames_) + im_format_dataset_ << "\n";	
 
 			return output_image;
 		}
@@ -369,7 +433,8 @@ class Fuser
 		sensor_msgs::CameraInfo info_rgb_;
 		unsigned int num_frames_;
 		std::string im_format_dataset_;
-		std::string dataset_path_;
+		std::string dataset_main_dir_;
+		std::map<std::string, std::string> datasets_dirs_;
 		std::string pcl_data_topic_;
 		std::string thermal_data_topic_;
 		std::string thermal_info_topic_;

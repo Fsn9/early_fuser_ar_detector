@@ -13,8 +13,8 @@
     <param name="namespace" value="$(arg namespace)"/>
     <param name="use_sim_time" value="true" />
     <param name="sync_sensors" value="true"/>
-    <param name="dataset_path" value="$(find platform_detector)/datasets/dummy/"/>
-    <param name="dataset_img_format" value=".bmp"/>
+    <param name="dataset_main_dir" value="$(find platform_detector)/datasets/"/>
+    <param name="dataset_img_format" value=".png"/>
     
     <!-- Variable args-->
     <!-- if namespace is needed put the namespace in topic names-->
@@ -45,8 +45,7 @@
 
     <!-- Launch bags-->
     <node pkg="rosbag" type="play" name="rosbag" output="screen" args="
-    $(arg old_bags)/test_16.bag
-    $(arg old_bags)/test_17.bag
+    $(arg 15_03_bags)/test_10.bag
     $(arg renamed_topics)
     --topics $(arg topics)
     --rate $(arg bag_freq)
