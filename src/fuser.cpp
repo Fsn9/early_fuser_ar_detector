@@ -58,7 +58,7 @@ class Fuser
 			ty_thermal_ = 120;
 			float warp_values[] = {1.0, 0.0, tx_thermal_, 0.0, 1.0, ty_thermal_};
 			cv::Mat translation_thermal_(2, 3, CV_32F, warp_values);
-			fused_image_pub_ = nh->advertise<sensor_msgs::Image>("early_fused_input", 1);
+			concatenated_input_pub_ = nh->advertise<sensor_msgs::Image>("early_fused_input", 1);
 			final_pcl_pub_ = nh->advertise<sensor_msgs::PointCloud2>("final_pcl", 1);
 			cv::Mat black_image_(cv::Size(1440,1080), CV_8UC1); // @TODO: solve hardcoded width and height
 
@@ -138,10 +138,6 @@ class Fuser
 		void fuse()
 		{
 			ROS_INFO(">> Fusing");
-			/// @brief header
-			std_msgs::Header msg_header = last_rgb_.header;
-			/// @brief frame id
-			std::string frame_id = msg_header.frame_id.c_str();
 			/// @brief image data
 			cv_bridge::CvImagePtr rgb_image_ptr;
 			cv_bridge::CvImagePtr thermal_image_ptr;
@@ -265,49 +261,65 @@ class Fuser
 					pcl_image.at<uchar>((int)points2D.y, (int)points2D.x) = 255 * (1.0 - depth / max_range_);
 				}
 			}
-
-			// Make depthmap message
-			std_msgs::Header fused_image_header;
-			fused_image_header.seq = num_frames_;
-			fused_image_header.stamp = msg_header.stamp;
-
-			// Dilate depth map
+			// Dilate image lidar points
 			cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(20,20));
 			cv::dilate(pcl_image, pcl_image, kernel);
 
 			// Concatenate images
-			cv::Mat input;
-			std::vector<cv::Mat> channels;
-			//black_image_ = 0; 
-			channels.push_back(rgb_image_ptr->image);
-			channels.push_back(thermal_image_ptr->image);
-			channels.push_back(pcl_image);
+			cv::Mat concatenated_input = generate_dataset_sample(rgb_image_ptr->image, thermal_image_ptr->image, pcl_image);
 
-			try
-			{
-				cv::merge(channels, input);
-			}
-			catch (cv::Exception &e)
-			{
-				ROS_ERROR("cv exception: %s", e.what());
-				return;
-			}
+			/// @brief Publish concatenated input
+			/// Define header
+			std_msgs::Header header = last_rgb_.header;
+			header.seq = num_frames_;
+			/// Publish
+			publish_concatenated_input(concatenated_input, header);
 
-			// Publish fused inputs
-			sensor_msgs::Image image_msg;
-			cv_bridge::CvImage fused_image_bridge = cv_bridge::CvImage(fused_image_header, sensor_msgs::image_encodings::BGR8, input);
-			fused_image_bridge.toImageMsg(image_msg);
-			fused_image_pub_.publish(image_msg);
-
-			// Save images
-			cv::imwrite(dataset_path_ + "im_visual_" + std::to_string(num_frames_) + im_format_dataset_, rgb_image_ptr->image);
-			cv::imwrite(dataset_path_ + "im_thermal_" + std::to_string(num_frames_) + im_format_dataset_, thermal_image_ptr->image);
-			cv::imwrite(dataset_path_ + "im_lidar_" + std::to_string(num_frames_) + im_format_dataset_, pcl_image);
-			cv::imwrite(dataset_path_ + "im_input_" + std::to_string(num_frames_) + im_format_dataset_, input);
-			std::cout << "PATH: " << dataset_path_ + "im_" + std::to_string(num_frames_) + im_format_dataset_ << "\n";	
 			num_frames_++;
 		}
 		
+		cv::Mat generate_dataset_sample(cv::Mat visual_channel, cv::Mat thermal_channel, cv::Mat pcl_channel)
+		{
+			cv::Mat output_image;
+			std::vector<cv::Mat> channels;
+
+			if (visual_channel.empty()) channels.push_back(black_image_);
+			else channels.push_back(visual_channel);
+
+			if (thermal_channel.empty()) channels.push_back(black_image_);
+			else channels.push_back(thermal_channel);
+
+			if (pcl_channel.empty()) channels.push_back(black_image_);
+			else channels.push_back(pcl_channel);
+
+			try
+			{
+				cv::merge(channels, output_image);
+			}
+			catch (cv::Exception &e)
+			{
+				ROS_ERROR("Failed to merge output image. cv exception: %s", e.what());
+				return black_image_;
+			}
+			
+			/// @brief Save images
+			cv::imwrite(dataset_path_ + "im_visual_" + std::to_string(num_frames_) + im_format_dataset_, visual_channel);
+			cv::imwrite(dataset_path_ + "im_thermal_" + std::to_string(num_frames_) + im_format_dataset_, thermal_channel);
+			cv::imwrite(dataset_path_ + "im_lidar_" + std::to_string(num_frames_) + im_format_dataset_, pcl_channel);
+			cv::imwrite(dataset_path_ + "im_concat_" + std::to_string(num_frames_) + im_format_dataset_, output_image);
+			std::cout << "PATH: " << dataset_path_ + "im_" + std::to_string(num_frames_) + im_format_dataset_ << "\n";	
+
+			return output_image;
+		}
+
+		void publish_concatenated_input(cv::Mat concat_input, std_msgs::Header header)
+		{
+			sensor_msgs::Image image_msg;
+			cv_bridge::CvImage image_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, concat_input);
+			image_bridge.toImageMsg(image_msg);
+			concatenated_input_pub_.publish(image_msg);
+		}
+
 		void load_cameras_info()
 		{
 			ROS_INFO("Loading Camera info...");
@@ -369,7 +381,7 @@ class Fuser
 		cv::Mat K_thermal_, D_thermal_, R_thermal_;
 		cv::Mat K_rgb_, D_rgb_, R_rgb_;
 		cv::Mat translation_thermal_; // The translation matrix
-		ros::Publisher fused_image_pub_;
+		ros::Publisher concatenated_input_pub_;
 		ros::Publisher final_pcl_pub_;
 		std::shared_ptr<ros::NodeHandle> nh_;
 		cv::Mat black_image_;
