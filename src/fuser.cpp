@@ -93,31 +93,25 @@ class Fuser
 
 			datasets_dirs_["complete"] = dataset_main_dir_ + datetime() + "_dataset_complete_input/";
 			if (mkdir(datasets_dirs_["complete"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
-			else std::cout << "Directory " + datasets_dirs_["complete"] + "created";
+			else std::cout << "Directory " + datasets_dirs_["complete"] + "created\n";
 
 			datasets_dirs_["visual"] = dataset_main_dir_ + datetime() + "_dataset_visual_input/";
 			if (mkdir(datasets_dirs_["visual"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
-			else std::cout << "Directory " + datasets_dirs_["visual"] + "created";
+			else std::cout << "Directory " + datasets_dirs_["visual"] + "created\n";
 
 			datasets_dirs_["thermal"] = dataset_main_dir_ + datetime() + "_dataset_thermal_input/";
 			if (mkdir(datasets_dirs_["thermal"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
-			else std::cout << "Directory " + datasets_dirs_["thermal"] + "created";
+			else std::cout << "Directory " + datasets_dirs_["thermal"] + "created\n";
 
 			datasets_dirs_["pcl"] = dataset_main_dir_ + datetime() + "_dataset_pcl_input/";
 			if (mkdir(datasets_dirs_["pcl"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
-			else std::cout << "Directory " + datasets_dirs_["pcl"] + "created";
+			else std::cout << "Directory " + datasets_dirs_["pcl"] + "created\n";
 
-			datasets_dirs_["visual_thermal"] = dataset_main_dir_ + datetime() + "_dataset_visual_thermal_input/";
-			if (mkdir(datasets_dirs_["visual_thermal"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
-			else std::cout << "Directory " + datasets_dirs_["visual_thermal"] + "created";
-
-			datasets_dirs_["visual_pcl"] = dataset_main_dir_ + datetime() + "_dataset_visual_pcl_input/";
-			if (mkdir(datasets_dirs_["visual_pcl"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
-			else std::cout << "Directory " + datasets_dirs_["visual_pcl"] + "created";
-
-			datasets_dirs_["thermal_pcl"] = dataset_main_dir_ + datetime() + "_dataset_thermal_pcl_input/";
-			if (mkdir(datasets_dirs_["thermal_pcl"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
-			else std::cout << "Directory " + datasets_dirs_["thermal_pcl"] + "created";
+			std::cout << "A: " << pcl_data_topic_ << "\n";
+			std::cout << "B: " << thermal_data_topic_ << "\n";
+			std::cout << "C: " << rgb_data_topic_ << "\n";
+			std::cout << "D_info: " << thermal_info_topic_ << "\n";
+			std::cout << "E_info: " << rgb_info_topic_ << "\n";
 
 			// Load camera infos
 			load_cameras_info();
@@ -174,14 +168,13 @@ class Fuser
 		void cb_sensors(const sensor_msgs::CompressedImage::ConstPtr& rgb_msg, const sensor_msgs::CompressedImage::ConstPtr& thermal_msg, const sensor_msgs::PointCloud2::ConstPtr& pcl_msg)
 		{
 			ROS_INFO("Synchronized sensor data arrived");
-			last_thermal_ = *thermal_msg;
-			last_rgb_ = *rgb_msg;
-			last_pcl_ = *pcl_msg;
+			fuse(*rgb_msg, *thermal_msg, *pcl_msg);
 		}
 		
-		void fuse()
+		void fuse(sensor_msgs::CompressedImage rgb_msg, sensor_msgs::CompressedImage thermal_msg, sensor_msgs::PointCloud2 pcl_msg)
 		{
 			ROS_INFO(">> Fusing");
+
 			/// @brief image data
 			cv_bridge::CvImagePtr rgb_image_ptr;
 			cv_bridge::CvImagePtr thermal_image_ptr;
@@ -189,8 +182,8 @@ class Fuser
 			// 1. Save image rgb message
 			try
 			{
-				if (rgb_to_gray) rgb_image_ptr = cv_bridge::toCvCopy(last_rgb_, sensor_msgs::image_encodings::MONO8);
-				else rgb_image_ptr = cv_bridge::toCvCopy(last_rgb_, sensor_msgs::image_encodings::RGB8);
+				if (rgb_to_gray) rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::MONO8);
+				else rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::RGB8);
 			}
 			catch (cv::Exception &e)
 			{
@@ -200,7 +193,7 @@ class Fuser
 			// 2. Save image thermal message
 			try
 			{
-				thermal_image_ptr = cv_bridge::toCvCopy(last_thermal_, sensor_msgs::image_encodings::MONO8);
+				thermal_image_ptr = cv_bridge::toCvCopy(thermal_msg, sensor_msgs::image_encodings::MONO8);
 			}
 			catch (cv::Exception &e)
 			{
@@ -243,7 +236,7 @@ class Fuser
 			pcl::PCLPointCloud2 filtered_pcl;
 
 			/// @brief Get last pcl message data and convert it to pcl native
-			pcl_conversions::toPCL(last_pcl_, *original_pcl);
+			pcl_conversions::toPCL(pcl_msg, *original_pcl);
 			
 			/// @brief Downsample the point cloud
 			pcl::VoxelGrid<pcl::PCLPointCloud2> grid;
@@ -318,17 +311,12 @@ class Fuser
 			generate_dataset_sample(black_image_, thermal_image_ptr->image, black_image_, datasets_dirs_["thermal"]);
 			// pcl only
 			generate_dataset_sample(black_image_, black_image_, pcl_image, datasets_dirs_["pcl"]);
-			// visual + thermal
-			generate_dataset_sample(rgb_image_ptr->image, thermal_image_ptr->image, black_image_, datasets_dirs_["visual_thermal"]);
-			// thermal + pcl
-			generate_dataset_sample(black_image_, thermal_image_ptr->image, pcl_image, datasets_dirs_["thermal_pcl"]);
-			// visual + pcl
-			generate_dataset_sample(rgb_image_ptr->image, black_image_, pcl_image, datasets_dirs_["visual_pcl"]);
 
 			/// @brief Publish concatenated input
 			/// Define header
 			std_msgs::Header header = last_rgb_.header;
 			header.seq = num_frames_;
+
 			/// Publish
 			publish_concatenated_input(concatenated_input, header);
 
@@ -470,14 +458,12 @@ int main(int argc, char **argv)
 	// Initialize fuser
 	Fuser fuser(nh);
 
-	tf::TransformListener tf_listener;
-	ros::Rate rate(6);
-	
+	// Main cycle
+	ros::Rate rate(10);	
 	while(ros::ok())
 	{
 		ros::spinOnce();
 		rate.sleep();
-		fuser.fuse();
 	}
 	return 0;
 }
