@@ -1,0 +1,70 @@
+<launch>        
+    <!--Args-->
+    <arg name="bag_freq" default="5"/>
+    <arg name="bag_path" default="$(find platform_detector)/bags/old"/>
+
+    <!-- Params -->
+    <param name="use_sim_time" value="true" />
+    <param name="sync_sensors" value="true"/>
+    <param name="dataset_main_dir" value="$(find platform_detector)/datasets/"/>
+    <param name="dataset_img_format" value=".png"/>
+    <param name="remove_watermark" value="true"/>
+    <param name="image_width" value="640"/>
+    <param name="image_height" value="480"/>
+    
+    <!-- Variable args-->
+    <!-- if namespace is needed put the namespace in topic names-->
+    <arg name="topics" default="
+        /usb_cam/image_raw/camera_info 
+        /usb_cam/image_raw/compressed 
+        /image_raw/compressed 
+        /image_raw/camera_info 
+        /os_cloud_node/points"
+    />
+    <arg name="renamed_topics" default="
+        /usb_cam/image_raw/compressed:=/old/usb_cam/image_raw/compressed
+        /image_raw/compressed:=/old/image_raw/compressed
+        /os_cloud_node/points:=/old/os_cloud_node/points
+    "/>
+    <arg name="time_filtered_topics" default="
+        /usb_cam/image_raw/compressed 
+        /image_raw/compressed
+        /os_cloud_node/points
+    "/>
+
+    <!-- Params -->
+    <param name="pcl_data_topic" value="/os_cloud_node/points"/>
+    <param name="thermal_data_topic" value="/usb_cam/image_raw/compressed"/>
+    <param name="thermal_info_topic" value="/usb_cam/image_raw/camera_info"/>
+    <param name="rgb_data_topic" value="/image_raw/compressed"/>
+    <param name="rgb_info_topic" value="/image_raw/camera_info"/>
+
+    <!-- Launch bags-->
+    <node pkg="rosbag" type="play" name="rosbag" output="screen" args="
+    $(arg bag_path)/test_15.bag
+    $(arg bag_path)/test_16.bag
+    $(arg renamed_topics)
+    --topics $(arg topics)
+    --rate $(arg bag_freq)
+    --clock
+    "/>
+
+    <!-- Launch time sync node to synchronize sensors timestamps -->
+    <include file="$(find platform_detector)/launch/time_sync.launch" />
+    
+    <!-- Important transforms-->
+    <!--<node pkg="rosbag" type="play" name="bags" output="screen" args=" clock $(arg bag_path)$(arg test_18) $(arg bag_path)$(arg test_19) $(arg bag_path)$(arg test_20) $(arg bag_path)$(arg test_21) loop"/>-->
+    <node pkg="tf" type="static_transform_publisher" name="cam2map" args="0 0 0 0 0 0 1  map cam 30" />
+    <node pkg="tf" type="static_transform_publisher" name="camera_frame2cam" args="0 0 0 0 0 0 1  cam camera_frame 30" />
+    <!-- RIGHT -->
+    <node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.119842 -0.22668 0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />
+    <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="-0.119842 0.22668 -0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
+    <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.0570006 0.119842 -0.22668 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
+    <node pkg="tf" type="static_transform_publisher" name="lidar2os_sensor" args="0 0 0 0 0 0 1  os_sensor lidar 30" />
+
+    <!-- Launch fuser node-->
+    <node pkg="platform_detector" type="fuser" name="fuser" output="screen"/>
+
+    <!-- Launch Rviz -->
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find platform_detector)/rviz/visualize.rviz" />
+</launch>

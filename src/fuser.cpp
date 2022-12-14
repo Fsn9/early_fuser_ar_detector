@@ -54,7 +54,7 @@ std::string datetime()
     time (&rawtime);
     timeinfo = localtime(&rawtime);
 
-    strftime(buffer,80,"%d-%m-%Y %H-%M-%S",timeinfo);
+    strftime(buffer,80,"%d-%m-%Y_%H-%M-%S",timeinfo);
     return std::string(buffer);
 }
 
@@ -70,10 +70,10 @@ class Fuser
 			tx_thermal_ = 50;
 			ty_thermal_ = 120;
 			float warp_values[] = {1.0, 0.0, tx_thermal_, 0.0, 1.0, ty_thermal_};
+			remove_watermark_ = false;
 			cv::Mat translation_thermal_(2, 3, CV_32F, warp_values);
 			concatenated_input_pub_ = nh->advertise<sensor_msgs::Image>("early_fused_input", 1);
 			final_pcl_pub_ = nh->advertise<sensor_msgs::PointCloud2>("final_pcl", 1);
-			black_image_ = cv::Mat::zeros(cv::Size(1440,1080), CV_8UC1); // @TODO: solve hardcoded width and height
 
 			// Initialize empty container for filtered pointcloud
 			last_filtered_pcl_ = boost::make_shared<PCL>();
@@ -87,6 +87,13 @@ class Fuser
 			nh->getParam("rgb_data_topic", rgb_data_topic_);
 			nh->getParam("rgb_info_topic", rgb_info_topic_);
 			nh->getParam("sync_sensors", sync_sensors_);
+			nh->getParam("remove_watermark", remove_watermark_);
+			nh->getParam("image_width", image_width_);
+			nh->getParam("image_height", image_height_);
+
+			// Auxiliar black image
+			desired_size_ = cv::Size(image_width_, image_height_);
+			black_image_ = cv::Mat::zeros(desired_size_, CV_8UC1);
 
 			// Create datasets folders for all combination of inputs
 			std::string timestamp = datetime();
@@ -106,12 +113,6 @@ class Fuser
 			datasets_dirs_["pcl"] = dataset_main_dir_ + datetime() + "_dataset_pcl_input/";
 			if (mkdir(datasets_dirs_["pcl"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
 			else std::cout << "Directory " + datasets_dirs_["pcl"] + "created\n";
-
-			std::cout << "A: " << pcl_data_topic_ << "\n";
-			std::cout << "B: " << thermal_data_topic_ << "\n";
-			std::cout << "C: " << rgb_data_topic_ << "\n";
-			std::cout << "D_info: " << thermal_info_topic_ << "\n";
-			std::cout << "E_info: " << rgb_info_topic_ << "\n";
 
 			// Load camera infos
 			load_cameras_info();
@@ -202,28 +203,29 @@ class Fuser
 			}
 
 			/* VISUAL */
-			// Desired final size of fused input
-			cv::Size desired_size(1440, 1080);
-
-			// UNDISTORT + RECTIFY (visual)
+			// UNDISTORT + RECTIFY
 			cv::Mat rm1, rm2;
 			cv::initUndistortRectifyMap(K_rgb_, D_rgb_, R_rgb_, K_rgb_, cv::Size(info_rgb_.width, info_rgb_.height), CV_32FC1, rm1, rm2);
 			cv::remap(rgb_image_ptr->image, rgb_image_ptr->image, rm1, rm2, cv::INTER_LINEAR);
+			// RESIZE
+			cv::resize(rgb_image_ptr->image, rgb_image_ptr->image, desired_size_);
+			
 
 			/* THERMAL */
 			// UNDISTORT + RECTIFY
 			rm1.release();
 			rm2.release();
-			cv::initUndistortRectifyMap(K_rgb_, D_rgb_, R_rgb_, K_rgb_, cv::Size(info_thermal_.width, info_thermal_.height), CV_32FC1, rm1, rm2);
+			cv::initUndistortRectifyMap(K_thermal_, D_thermal_, R_thermal_, K_thermal_, cv::Size(info_thermal_.width, info_thermal_.height), CV_32FC1, rm1, rm2); // @TODO: mudar isto dependendo se é crow ou raven
 			cv::remap(thermal_image_ptr->image, thermal_image_ptr->image, rm1, rm2, cv::INTER_LINEAR);
+
+			
+			// RESIZE to rgb size
+			cv::resize(thermal_image_ptr->image, thermal_image_ptr->image, rgb_image_ptr->image.size());
 			
 			// PAINT (flir water mark)
-			cv::rectangle(thermal_image_ptr->image, cv::Point(460,10), cv::Point(560,70), cv::Scalar(0,0,0), cv::FILLED);
+			if(remove_watermark_) cv::rectangle(thermal_image_ptr->image, cv::Point(460,10), cv::Point(560,70), cv::Scalar(0,0,0), cv::FILLED);
 
-			// RESIZE (thermal) to rgb size
-			cv::resize(thermal_image_ptr->image, thermal_image_ptr->image, rgb_image_ptr->image.size());
-
-			// AFFINE (align thermal with rgb)
+			// AFFINE (align thermal with rgb) @TODO: fazer translaçao com os valores das tfs
 			//cv::warpAffine(thermal_image_ptr->image, thermal_image_ptr->image, translation_thermal_, thermal_image_ptr->image.size());
 			//cv::namedWindow("thermal_affine", cv::WINDOW_NORMAL);
 			//cv::resizeWindow("thermal_affine", 640, 480);
@@ -302,6 +304,9 @@ class Fuser
 			cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(20,20));
 			cv::dilate(pcl_image, pcl_image, kernel);
 
+			// Final resize
+			cv::resize(pcl_image, pcl_image, desired_size_);
+
 			/// @brief Generate datasets for all configuration of inputs
 			// all inputs
 			cv::Mat concatenated_input = generate_dataset_sample(rgb_image_ptr->image, thermal_image_ptr->image, pcl_image, datasets_dirs_["complete"]);
@@ -321,6 +326,8 @@ class Fuser
 			publish_concatenated_input(concatenated_input, header);
 
 			num_frames_++;
+
+			std::cout << "Saved images idx " << num_frames_<< "\n";
 		}
 		
 		cv::Mat generate_dataset_sample(cv::Mat visual_channel, cv::Mat thermal_channel, cv::Mat pcl_channel, std::string dataset_folder_path)
@@ -359,7 +366,6 @@ class Fuser
 			
 			/// @brief Save images
 			cv::imwrite(dataset_folder_path + "im_concat_" + std::to_string(num_frames_) + im_format_dataset_, output_image);
-			std::cout << "PATH: " << dataset_main_dir_ + "im_" + std::to_string(num_frames_) + im_format_dataset_ << "\n";	
 
 			return output_image;
 		}
@@ -428,7 +434,10 @@ class Fuser
 		std::string thermal_info_topic_;
 		std::string rgb_data_topic_;
 		std::string rgb_info_topic_;
+		int image_width_, image_height_;
+		cv::Size desired_size_;
 		bool sync_sensors_;
+		bool remove_watermark_;
 		float max_range_;
 		float tx_thermal_, ty_thermal_; // Translation to align thermal with visual image
 		cv::Mat K_thermal_, D_thermal_, R_thermal_;

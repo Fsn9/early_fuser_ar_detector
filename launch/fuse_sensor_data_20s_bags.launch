@@ -1,13 +1,8 @@
 <launch>        
     <!--Args-->
     <arg name="bag_freq" default="5"/>
-    <arg name="bag_path" default="$(find platform_detector)/bags"/>
-    <arg name="old_bags" default="$(arg bag_path)/old"/>
-    <arg name="14_07_bags" default="$(arg bag_path)/14_07_2022"/>
-    <arg name="15_03_bags" default="$(arg bag_path)/15_03_2022-FADEUP"/>
-    <arg name="20_07_bags" default="$(arg bag_path)/20-21-22_07_2022"/>
-    <arg name="all_bags" default="*.bag"/>
-    <arg name="namespace" value=""/>
+    <arg name="bag_path" default="$(find platform_detector)/bags/20-21-22_07_2022"/>
+    <arg name="namespace" value="raven"/>
 
     <!-- Params -->
     <param name="namespace" value="$(arg namespace)"/>
@@ -15,37 +10,42 @@
     <param name="sync_sensors" value="true"/>
     <param name="dataset_main_dir" value="$(find platform_detector)/datasets/"/>
     <param name="dataset_img_format" value=".png"/>
+    <param name="remove_watermark" value="false"/>
+    <param name="image_width" value="640"/>
+    <param name="image_height" value="480"/>
     
     <!-- Variable args-->
     <!-- if namespace is needed put the namespace in topic names-->
     <arg name="topics" default="
-        $(arg namespace)/usb_cam/image_raw/camera_info 
-        $(arg namespace)/usb_cam/image_raw/compressed 
-        $(arg namespace)/image_raw/compressed 
-        $(arg namespace)/image_raw/camera_info 
-        $(arg namespace)/os_cloud_node/points"
+        /$(arg namespace)/flir_boson/camera_info 
+        /$(arg namespace)/flir_boson/image_raw/compressed 
+        /$(arg namespace)/tis/image_raw/compressed 
+        /$(arg namespace)/tis/camera_info 
+        /$(arg namespace)/os_cloud_node/points"
     />
     <arg name="renamed_topics" default="
-        $(arg namespace)/usb_cam/image_raw/compressed:=$(arg namespace)/old/usb_cam/image_raw/compressed
-        $(arg namespace)/image_raw/compressed:=$(arg namespace)/old/image_raw/compressed
-        $(arg namespace)/os_cloud_node/points:=$(arg namespace)/old/os_cloud_node/points
+        /$(arg namespace)/flir_boson/image_raw/compressed:=/old/$(arg namespace)/flir_boson/image_raw/compressed
+        /$(arg namespace)/tis/image_raw/compressed:=/old/$(arg namespace)/tis/image_raw/compressed
+        /$(arg namespace)/os_cloud_node/points:=/old/$(arg namespace)/os_cloud_node/points
     "/>
     <arg name="time_filtered_topics" default="
-        $(arg namespace)/usb_cam/image_raw/compressed 
-        $(arg namespace)/image_raw/compressed
-        $(arg namespace)/os_cloud_node/points
+        /$(arg namespace)/flir_boson/image_raw/compressed 
+        /$(arg namespace)/tis/image_raw/compressed
+        /$(arg namespace)/os_cloud_node/points
     "/>
 
     <!-- Params -->
-    <param name="pcl_data_topic" value="$(arg namespace)/os_cloud_node/points"/>
-    <param name="thermal_data_topic" value="$(arg namespace)/usb_cam/image_raw/compressed"/>
-    <param name="thermal_info_topic" value="$(arg namespace)/usb_cam/image_raw/camera_info"/>
-    <param name="rgb_data_topic" value="$(arg namespace)/image_raw/compressed"/>
-    <param name="rgb_info_topic" value="$(arg namespace)/image_raw/camera_info"/>
+    <param name="pcl_data_topic" value="/$(arg namespace)/os_cloud_node/points"/>
+    <param name="thermal_data_topic" value="/$(arg namespace)/flir_boson/image_raw/compressed"/>
+    <param name="thermal_info_topic" value="/$(arg namespace)/flir_boson/camera_info"/>
+    <param name="rgb_data_topic" value="/$(arg namespace)/tis/image_raw/compressed"/>
+    <param name="rgb_info_topic" value="/$(arg namespace)/tis/camera_info"/>
 
     <!-- Launch bags-->
     <node pkg="rosbag" type="play" name="rosbag" output="screen" args="
-    $(arg 15_03_bags)/test_10.bag
+    $(arg bag_path)/raven_2022-07-22-07-39-22_7.bag
+    $(arg bag_path)/raven_2022-07-22-07-48-50_9.bag
+    $(arg bag_path)/raven_2022-07-22-08-02-18_12.bag
     $(arg renamed_topics)
     --topics $(arg topics)
     --rate $(arg bag_freq)
@@ -53,7 +53,7 @@
     "/>
 
     <!-- Launch time sync node to synchronize sensors timestamps -->
-    <include file="$(find platform_detector)/launch/time_sync.launch" />
+    <include file="$(find platform_detector)/launch/time_sync_with_namespace.launch" />
     
     <!-- Important transforms-->
     <!--<node pkg="rosbag" type="play" name="bags" output="screen" args=" clock $(arg bag_path)$(arg test_18) $(arg bag_path)$(arg test_19) $(arg bag_path)$(arg test_20) $(arg bag_path)$(arg test_21) loop"/>-->
@@ -69,5 +69,5 @@
     <node pkg="platform_detector" type="fuser" name="fuser" output="screen"/>
 
     <!-- Launch Rviz -->
-    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find platform_detector)/rviz/visualize.rviz" />
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find platform_detector)/rviz/visualize_with_namespace.rviz" />
 </launch>
