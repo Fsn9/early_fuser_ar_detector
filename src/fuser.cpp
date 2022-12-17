@@ -39,7 +39,7 @@
 #include <pcl_ros/transforms.h>
 #include <pcl_ros/impl/transforms.hpp>
 
-typedef pcl::PointCloud<pcl::PointXYZ> PCL;
+typedef pcl::PointCloud<pcl::PointXYZI> PCL;
 typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, sensor_msgs::PointCloud2> SyncPolicy;
 
 const bool rgb_to_gray = true;
@@ -79,6 +79,9 @@ class Fuser
 			last_filtered_pcl_ = boost::make_shared<PCL>();
 
 			// Load ros params
+			nh->getParam("pcl_intensity_threshold", pcl_intensity_threshold_);
+			nh->getParam("bag_namespace", bag_namespace_);
+			nh->getParam("bag_path", bag_path_);
 			nh->getParam("dataset_main_dir", dataset_main_dir_);
 			nh->getParam("dataset_img_format", im_format_dataset_);
 			nh->getParam("pcl_data_topic", pcl_data_topic_);
@@ -96,21 +99,21 @@ class Fuser
 			black_image_ = cv::Mat::zeros(desired_size_, CV_8UC1);
 
 			// Create datasets folders for all combination of inputs
-			std::string timestamp = datetime();
+			hash_dir_ = datetime() + "_" + "bag-" + bag_namespace_;
 
-			datasets_dirs_["complete"] = dataset_main_dir_ + datetime() + "_dataset_complete_input/";
+			datasets_dirs_["complete"] = dataset_main_dir_ + hash_dir_ + "_dataset-complete-input/";
 			if (mkdir(datasets_dirs_["complete"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
 			else std::cout << "Directory " + datasets_dirs_["complete"] + "created\n";
 
-			datasets_dirs_["visual"] = dataset_main_dir_ + datetime() + "_dataset_visual_input/";
+			datasets_dirs_["visual"] = dataset_main_dir_ + hash_dir_ + "_dataset-visual-input/";
 			if (mkdir(datasets_dirs_["visual"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
 			else std::cout << "Directory " + datasets_dirs_["visual"] + "created\n";
 
-			datasets_dirs_["thermal"] = dataset_main_dir_ + datetime() + "_dataset_thermal_input/";
+			datasets_dirs_["thermal"] = dataset_main_dir_ + hash_dir_ + "_dataset-thermal-input/";
 			if (mkdir(datasets_dirs_["thermal"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
 			else std::cout << "Directory " + datasets_dirs_["thermal"] + "created\n";
 
-			datasets_dirs_["pcl"] = dataset_main_dir_ + datetime() + "_dataset_pcl_input/";
+			datasets_dirs_["pcl"] = dataset_main_dir_ + hash_dir_ + "_dataset-pcl-input/";
 			if (mkdir(datasets_dirs_["pcl"].c_str(), 0777) == -1) std::cerr << "Error :  " << strerror(errno) << std::endl;
 			else std::cout << "Directory " + datasets_dirs_["pcl"] + "created\n";
 
@@ -250,7 +253,7 @@ class Fuser
 			pcl::fromPCLPointCloud2(filtered_pcl, *last_filtered_pcl_);
 			
 			/// @brief Crop pointcloud
-			pcl::CropBox<pcl::PointXYZ> crop;
+			pcl::CropBox<pcl::PointXYZI> crop;
 			crop.setInputCloud(last_filtered_pcl_);
 			crop.setMin(Eigen::Vector4f(-2.0, 0, -2.0, 1.0));
 			crop.setMax(Eigen::Vector4f(2.0, max_range_, 2.0, 1.0));
@@ -263,7 +266,7 @@ class Fuser
     		}
 			catch (tf::TransformException &ex) 
 			{
-		    	ROS_WARN("%s",ex.what());
+				ROS_WARN("%s",ex.what());
     		}
 			/// @brief Transform point cloud frame to camera frame
 			pcl_ros::transformPointCloud(*last_filtered_pcl_, *last_filtered_pcl_, lidar2cam_tf_);
@@ -283,16 +286,16 @@ class Fuser
 
 			// Image of depths
 			cv::Mat pcl_image = cv::Mat::zeros(cv::Size(info_rgb_.width, info_rgb_.height), CV_8UC1);
-			for (pcl::PointXYZ point : last_filtered_pcl_->points)
+			for (pcl::PointXYZI point : last_filtered_pcl_->points)
 			{
 				points3D.x = point.y; // xcam = zlaser
 				points3D.y = point.z; // ycam = xlaser
 				points3D.z = point.x; // zcam = ylaser
 				depth = points3D.z; 
 
-				points2D = camera_geometry.project3dToPixel(points3D);				
+				points2D = camera_geometry.project3dToPixel(points3D);			
 
-				if (points2D.x > 0 && points2D.x < info_rgb_.width && points2D.y > 0 && points2D.y < info_rgb_.height)
+				if (points2D.x > 0 && points2D.x < info_rgb_.width && points2D.y > 0 && points2D.y < info_rgb_.height && point.intensity > 9000)
 				{
 					// Saturate depth
 					if(depth >= max_range_) depth = max_range_;
@@ -337,20 +340,23 @@ class Fuser
 			if (cv::countNonZero(visual_channel) < 1) channels.push_back(black_image_);
 			else 
 			{
+				std::cout << "Writing visual\n";
 				channels.push_back(visual_channel);
-				cv::imwrite(dataset_folder_path + "im_visual_" + std::to_string(num_frames_) + im_format_dataset_, visual_channel);
+				cv::imwrite(dataset_folder_path + "im-visual-" + std::to_string(num_frames_) + "_" + hash_dir_ + im_format_dataset_, visual_channel);
 			}
 			if (cv::countNonZero(thermal_channel) < 1) channels.push_back(black_image_);
 			else
 			{
+				std::cout << "Writing thermal\n";
 				channels.push_back(thermal_channel);
-				cv::imwrite(dataset_folder_path + "im_thermal_" + std::to_string(num_frames_) + im_format_dataset_, thermal_channel);
+				cv::imwrite(dataset_folder_path + "im-thermal-" + std::to_string(num_frames_) + "_" + hash_dir_ + im_format_dataset_, thermal_channel);
 			} 
 			if (cv::countNonZero(pcl_channel) < 1) channels.push_back(black_image_);
 			else 
 			{
+				std::cout << "Writing pcl\n";
 				channels.push_back(pcl_channel);
-				cv::imwrite(dataset_folder_path + "im_lidar_" + std::to_string(num_frames_) + im_format_dataset_, pcl_channel);
+				cv::imwrite(dataset_folder_path + "im-pcl-" + std::to_string(num_frames_) + "_" + hash_dir_ + im_format_dataset_, pcl_channel);
 			}
 
 			/// @brief Concatenate
@@ -365,7 +371,7 @@ class Fuser
 			}
 			
 			/// @brief Save images
-			cv::imwrite(dataset_folder_path + "im_concat_" + std::to_string(num_frames_) + im_format_dataset_, output_image);
+			cv::imwrite(dataset_folder_path + "im-concat-" + std::to_string(num_frames_) + "_" + hash_dir_ + im_format_dataset_, output_image);
 
 			return output_image;
 		}
@@ -396,24 +402,30 @@ class Fuser
 			info_rgb_ = *info_rgb_ptr;
 			info_thermal_ = *info_thermal_ptr;
 
-			// RGB
-			info_rgb_.D = {-0.5138254596294459, 0.44290503681520377, 0.0020747506912668404, 0.0011692118540784398, -0.3681143872182688};
-			info_rgb_.K = {1743.4035352713363, 0.0, 760.3723854064434, 0.0, 1739.4423246973906, 595.5405415362117, 0.0, 0.0, 1.0};	
+			std::cout << "HERE MOTHAFUCKA: " << bag_path_ << "\n";
+			// If old bags put hardcoded calibration parameters
+			if (bag_path_.find("bags/old") != std::string::npos || bag_path_.find("bags/15-03") != std::string::npos)
+			{
+				std::cout << "ENTERED\n";
+				// Thermal
+				info_thermal_.D = {-8.7955719162052803e-03, 2.7957338512854757e-01, 2.9514273519729906e-03, -7.8091815268012512e-03, -1.0969845111284882e+00};
+				info_thermal_.K = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.,7.3675903031957341e+02,2.5406537636242152e+02,0.,0.,1.};	
+				info_thermal_.R = {1,0,0,0,1,0,0,0,1};
+				info_thermal_.P = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.0, 
+					0.,7.3675903031957341e+02,2.5406537636242152e+02, 0.0,
+					0.,0.,1.,0.};
+			}
+
+			// Fill R and P missing values for visual source for all bags
 			info_rgb_.R = {1,0,0,0,1,0,0,0,1};
 			info_rgb_.P = {1743.4035352713363, 0.0, 760.3723854064434, 0.0,
-				0.0, 1739.4423246973906, 595.5405415362117, 0.0,
-				0.0, 0.0, 1.0, 0.0};
+					0.0, 1739.4423246973906, 595.5405415362117, 0.0,
+					0.0, 0.0, 1.0, 0.0};
+
 			K_rgb_ = cv::Mat(3, 3, CV_64F, &info_rgb_.K[0]);
 			D_rgb_ = cv::Mat(5, 1, CV_64F, &info_rgb_.D[0]);
 			R_rgb_ = cv::Mat(3, 3, CV_64F, &info_rgb_.R[0]);
 
-			// Thermal
-			info_thermal_.D = {-8.7955719162052803e-03, 2.7957338512854757e-01, 2.9514273519729906e-03, -7.8091815268012512e-03, -1.0969845111284882e+00};
-			info_thermal_.K = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.,7.3675903031957341e+02,2.5406537636242152e+02,0.,0.,1.};	
-			info_thermal_.R = {1,0,0,0,1,0,0,0,1};
-			info_thermal_.P = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.0, 
-				0.,7.3675903031957341e+02,2.5406537636242152e+02, 0.0,
-				0.,0.,1.,0.};
 			K_thermal_ = cv::Mat(3, 3, CV_64F, &info_thermal_.K[0]);
 			D_thermal_ = cv::Mat(5, 1, CV_64F, &info_thermal_.D[0]);
 			R_thermal_ = cv::Mat(3, 3, CV_64F, &info_thermal_.R[0]);
@@ -426,8 +438,11 @@ class Fuser
 		sensor_msgs::CameraInfo info_thermal_;
 		sensor_msgs::CameraInfo info_rgb_;
 		unsigned int num_frames_;
+		std::string hash_dir_;
 		std::string im_format_dataset_;
 		std::string dataset_main_dir_;
+		std::string bag_namespace_;
+		std::string bag_path_;
 		std::map<std::string, std::string> datasets_dirs_;
 		std::string pcl_data_topic_;
 		std::string thermal_data_topic_;
@@ -436,6 +451,7 @@ class Fuser
 		std::string rgb_info_topic_;
 		int image_width_, image_height_;
 		cv::Size desired_size_;
+		int pcl_intensity_threshold_;
 		bool sync_sensors_;
 		bool remove_watermark_;
 		float max_range_;

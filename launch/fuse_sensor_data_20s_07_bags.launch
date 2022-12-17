@@ -1,10 +1,13 @@
 <launch>        
     <!--Args-->
     <arg name="bag_freq" default="5"/>
-    <arg name="bag_path" default="$(find platform_detector)/bags/20-21-22_07_2022"/>
+    <arg name="bag_namespace" default="20s-07-2022"/>
+    <arg name="bag_path" default="$(find platform_detector)/bags/$(arg bag_namespace)"/>
     <arg name="namespace" value="raven"/>
 
     <!-- Params -->
+    <param name="bag_namespace" value="$(arg bag_namespace)"/>
+    <param name="bag_path" value="$(arg bag_path)"/>
     <param name="namespace" value="$(arg namespace)"/>
     <param name="use_sim_time" value="true" />
     <param name="sync_sensors" value="true"/>
@@ -13,6 +16,7 @@
     <param name="remove_watermark" value="false"/>
     <param name="image_width" value="640"/>
     <param name="image_height" value="480"/>
+    <param name="pcl_intensity_threshold" value="9000"/>
     
     <!-- Variable args-->
     <!-- if namespace is needed put the namespace in topic names-->
@@ -43,9 +47,12 @@
 
     <!-- Launch bags-->
     <node pkg="rosbag" type="play" name="rosbag" output="screen" args="
-    $(arg bag_path)/raven_2022-07-22-07-39-22_7.bag
-    $(arg bag_path)/raven_2022-07-22-07-48-50_9.bag
-    $(arg bag_path)/raven_2022-07-22-08-02-18_12.bag
+    $(arg bag_path)/raven_2022-07-21-09-44-48_3.bag
+    $(arg bag_path)/raven_2022-07-21-09-45-30_4.bag
+    $(arg bag_path)/raven_2022-07-21-09-46-10_5.bag
+    $(arg bag_path)/raven_2022-07-21-09-46-50_6.bag
+    $(arg bag_path)/raven_2022-07-21-09-47-32_7.bag
+    $(arg bag_path)/raven_2022-07-21-09-48-14_8.bag
     $(arg renamed_topics)
     --topics $(arg topics)
     --rate $(arg bag_freq)
@@ -60,9 +67,9 @@
     <node pkg="tf" type="static_transform_publisher" name="cam2map" args="0 0 0 0 0 0 1  map cam 30" />
     <node pkg="tf" type="static_transform_publisher" name="camera_frame2cam" args="0 0 0 0 0 0 1  cam camera_frame 30" />
     <!-- RIGHT -->
-    <node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.119842 -0.22668 0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />
+    <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.119842 -0.22668 0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
     <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="-0.119842 0.22668 -0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
-    <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.0570006 0.119842 -0.22668 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
+    <node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.02638 0.02626 0.15379 0 -1.57075 3.1415  camera_frame os_sensor 100" />
     <node pkg="tf" type="static_transform_publisher" name="lidar2os_sensor" args="0 0 0 0 0 0 1  os_sensor lidar 30" />
 
     <!-- Launch fuser node-->

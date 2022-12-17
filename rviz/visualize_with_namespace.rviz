@@ -5,7 +5,6 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /TF1/Frames1
-        - /raw 3D LiDAR1
       Splitter Ratio: 0.5
     Tree Height: 75
   - Class: rviz/Selection
@@ -25,7 +24,7 @@ Panels:
   - Class: rviz/Time
     Name: Time
     SyncMode: 0
-    SyncSource: ""
+    SyncSource: raw 3D LiDAR
 Preferences:
   PromptSaveOnExit: true
 Toolbars:
@@ -189,7 +188,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 13.762649536132812
+      Distance: 4.877007484436035
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -230,4 +229,4 @@ Window Geometry:
     collapsed: false
   Width: 1048
   X: 872
-  Y: 235
+  Y: 161
