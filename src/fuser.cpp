@@ -42,7 +42,6 @@
 typedef pcl::PointCloud<pcl::PointXYZI> PCL;
 typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, sensor_msgs::PointCloud2> SyncPolicy;
 
-const bool rgb_to_gray = true;
 const float leaf_size = 0.05;
 
 std::string datetime()
@@ -66,12 +65,13 @@ class Fuser
 			nh_ = nh;
 			// Set parameters
 			num_frames_ = 0;
-			max_range_ = 8.0;
+			max_depth_ = 7.0;
 			tx_thermal_ = 50;
 			ty_thermal_ = 120;
+			last_depth_ = 0;
 			float warp_values[] = {1.0, 0.0, tx_thermal_, 0.0, 1.0, ty_thermal_};
 			remove_watermark_ = false;
-			cv::Mat translation_thermal_(2, 3, CV_32F, warp_values);
+			translation_thermal_ = cv::Mat(2, 3, CV_32F, warp_values);
 			concatenated_input_pub_ = nh->advertise<sensor_msgs::Image>("early_fused_input", 1);
 			final_pcl_pub_ = nh->advertise<sensor_msgs::PointCloud2>("final_pcl", 1);
 
@@ -79,6 +79,7 @@ class Fuser
 			last_filtered_pcl_ = boost::make_shared<PCL>();
 
 			// Load ros params
+			nh->getParam("rgb_to_gray", rgb_to_gray_);
 			nh->getParam("pcl_intensity_threshold", pcl_intensity_threshold_);
 			nh->getParam("bag_namespace", bag_namespace_);
 			nh->getParam("bag_path", bag_path_);
@@ -186,7 +187,7 @@ class Fuser
 			// 1. Save image rgb message
 			try
 			{
-				if (rgb_to_gray) rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::MONO8);
+				if (rgb_to_gray_) rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::MONO8);
 				else rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::RGB8);
 			}
 			catch (cv::Exception &e)
@@ -212,7 +213,6 @@ class Fuser
 			cv::remap(rgb_image_ptr->image, rgb_image_ptr->image, rm1, rm2, cv::INTER_LINEAR);
 			// RESIZE
 			cv::resize(rgb_image_ptr->image, rgb_image_ptr->image, desired_size_);
-			
 
 			/* THERMAL */
 			// UNDISTORT + RECTIFY
@@ -228,11 +228,13 @@ class Fuser
 			// PAINT (flir water mark)
 			if(remove_watermark_) cv::rectangle(thermal_image_ptr->image, cv::Point(460,10), cv::Point(560,70), cv::Scalar(0,0,0), cv::FILLED);
 
-			// AFFINE (align thermal with rgb) @TODO: fazer translaçao com os valores das tfs
-			//cv::warpAffine(thermal_image_ptr->image, thermal_image_ptr->image, translation_thermal_, thermal_image_ptr->image.size());
-			//cv::namedWindow("thermal_affine", cv::WINDOW_NORMAL);
-			//cv::resizeWindow("thermal_affine", 640, 480);
-			//cv::imshow("thermal_affine", thermal_image_ptr->image);
+			// Binarize
+			threshold(thermal_image_ptr->image, thermal_image_ptr->image, 128, 255, 0);
+
+			// AFFINE (align thermal with rgb)
+			translation_thermal_.at<float>(0, 2) = (1 - last_depth_ / max_depth_) * tx_thermal_;
+			translation_thermal_.at<float>(1, 2) = (1 - last_depth_ / max_depth_) * ty_thermal_;
+			cv::warpAffine(thermal_image_ptr->image, thermal_image_ptr->image, translation_thermal_, thermal_image_ptr->image.size());
 
 			/* Point Cloud */
 			/// @brief Containers for original & filtered point cloud data
@@ -256,7 +258,7 @@ class Fuser
 			pcl::CropBox<pcl::PointXYZI> crop;
 			crop.setInputCloud(last_filtered_pcl_);
 			crop.setMin(Eigen::Vector4f(-2.0, 0, -2.0, 1.0));
-			crop.setMax(Eigen::Vector4f(2.0, max_range_, 2.0, 1.0));
+			crop.setMax(Eigen::Vector4f(2.0, max_depth_, 2.0, 1.0));
 			crop.filter(*last_filtered_pcl_);
 
 			// Get transform from lidar to the camera frame
@@ -293,14 +295,19 @@ class Fuser
 				points3D.z = point.x; // zcam = ylaser
 				depth = points3D.z; 
 
+				// Saturate depth
+				std::cout << "depth: " << depth << "\n";
+				if(depth >= max_depth_) depth = max_depth_;
+				last_depth_ = depth;
+
+				// Project 3D to 2D
 				points2D = camera_geometry.project3dToPixel(points3D);			
 
+				// If point is intense (reflected by aruco) then save and paint that point
 				if (points2D.x > 0 && points2D.x < info_rgb_.width && points2D.y > 0 && points2D.y < info_rgb_.height && point.intensity > 9000)
 				{
-					// Saturate depth
-					if(depth >= max_range_) depth = max_range_;
 					// Draw pointcloud 2D image
-					pcl_image.at<uchar>((int)points2D.y, (int)points2D.x) = 255 * (1.0 - depth / max_range_);
+					pcl_image.at<uchar>((int)points2D.y, (int)points2D.x) = 255 * (1.0 - depth / max_depth_);
 				}
 			}
 			// Dilate image lidar points
@@ -402,11 +409,9 @@ class Fuser
 			info_rgb_ = *info_rgb_ptr;
 			info_thermal_ = *info_thermal_ptr;
 
-			std::cout << "HERE MOTHAFUCKA: " << bag_path_ << "\n";
 			// If old bags put hardcoded calibration parameters
 			if (bag_path_.find("bags/old") != std::string::npos || bag_path_.find("bags/15-03") != std::string::npos)
 			{
-				std::cout << "ENTERED\n";
 				// Thermal
 				info_thermal_.D = {-8.7955719162052803e-03, 2.7957338512854757e-01, 2.9514273519729906e-03, -7.8091815268012512e-03, -1.0969845111284882e+00};
 				info_thermal_.K = {5.8651197564377128e+02, 0., 3.0317247522782532e+02, 0.,7.3675903031957341e+02,2.5406537636242152e+02,0.,0.,1.};	
@@ -438,6 +443,7 @@ class Fuser
 		sensor_msgs::CameraInfo info_thermal_;
 		sensor_msgs::CameraInfo info_rgb_;
 		unsigned int num_frames_;
+		double last_depth_;
 		std::string hash_dir_;
 		std::string im_format_dataset_;
 		std::string dataset_main_dir_;
@@ -451,10 +457,11 @@ class Fuser
 		std::string rgb_info_topic_;
 		int image_width_, image_height_;
 		cv::Size desired_size_;
+		bool rgb_to_gray_;
 		int pcl_intensity_threshold_;
 		bool sync_sensors_;
 		bool remove_watermark_;
-		float max_range_;
+		float max_depth_;
 		float tx_thermal_, ty_thermal_; // Translation to align thermal with visual image
 		cv::Mat K_thermal_, D_thermal_, R_thermal_;
 		cv::Mat K_rgb_, D_rgb_, R_rgb_;

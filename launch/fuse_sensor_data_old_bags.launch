@@ -15,6 +15,7 @@
     <param name="image_width" value="640"/>
     <param name="image_height" value="480"/>
     <param name="pcl_intensity_threshold" value="9000"/>
+    <param name="rgb_to_gray" value="true"/>
     
     <!-- Variable args-->
     <!-- if namespace is needed put the namespace in topic names-->
