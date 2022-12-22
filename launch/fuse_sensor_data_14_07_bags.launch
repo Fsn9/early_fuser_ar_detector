@@ -18,6 +18,11 @@
     <param name="image_height" value="480"/>
     <param name="pcl_intensity_threshold" value="9000"/>
     <param name="rgb_to_gray" value="true"/>
+    <param name="binarize_thermal" value="false"/> <!-- Badly calibrated thermal -->
+    <param name="translation_thermal_x" value="12"/>
+    <param name="translation_thermal_y" value="12"/>
+    <param name="area_aruco_threshold" value="100"/>
+    <param name="binary_threshold" value="128"/>
     
     <!-- Variable args-->
     <!-- if namespace is needed put the namespace in topic names-->
@@ -51,10 +56,15 @@
     $(arg bag_path)/test_3.bag
     $(arg bag_path)/test_7.bag
     $(arg bag_path)/test_8.bag
+    $(arg bag_path)/test_19.bag
+    $(arg bag_path)/test_20.bag
+    $(arg bag_path)/test_21.bag
     $(arg renamed_topics)
     --topics $(arg topics)
     --rate $(arg bag_freq)
+    --quiet
     --clock
+    --skip-empty=5
     "/>
 
     <!-- Launch time sync node to synchronize sensors timestamps -->

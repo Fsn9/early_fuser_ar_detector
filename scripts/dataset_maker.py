@@ -148,7 +148,8 @@ def make_dataset():
 			(topLeft[0], topLeft[1] - 15), cv2.FONT_HERSHEY_SIMPLEX,
 			0.5, (0, 255, 0), 2)
 		xmin, ymin, xmax, ymax = topLeft[0] / IMG_WIDTH, topLeft[1] / IMG_HEIGHT, bottomRight[0] / IMG_WIDTH, bottomRight[1] / IMG_HEIGHT
-
+		cv2.imshow("Image", image)
+		cv2.waitKey(0)
 		# Save label
 		image_file = image_name + '.png'
 		if image_file in images_train:

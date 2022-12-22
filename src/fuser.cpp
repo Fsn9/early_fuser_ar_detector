@@ -39,6 +39,12 @@
 #include <pcl_ros/transforms.h>
 #include <pcl_ros/impl/transforms.hpp>
 
+// Aruco detector
+#include <opencv2/aruco.hpp>
+
+// C++ libs
+#include <algorithm>
+
 typedef pcl::PointCloud<pcl::PointXYZI> PCL;
 typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::CompressedImage, sensor_msgs::CompressedImage, sensor_msgs::PointCloud2> SyncPolicy;
 
@@ -66,19 +72,27 @@ class Fuser
 			// Set parameters
 			num_frames_ = 0;
 			max_depth_ = 7.0;
-			tx_thermal_ = 50;
-			ty_thermal_ = 120;
+			tx_thermal_ = 0;
+			ty_thermal_ = 0;
 			last_depth_ = 0;
-			float warp_values[] = {1.0, 0.0, tx_thermal_, 0.0, 1.0, ty_thermal_};
 			remove_watermark_ = false;
-			translation_thermal_ = cv::Mat(2, 3, CV_32F, warp_values);
+
+			// Publishers
 			concatenated_input_pub_ = nh->advertise<sensor_msgs::Image>("early_fused_input", 1);
 			final_pcl_pub_ = nh->advertise<sensor_msgs::PointCloud2>("final_pcl", 1);
+
+			// Aruco third-party library detection
+			aruco_dict_ = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_ARUCO_ORIGINAL);
+			aruco_params_visual_ = cv::aruco::DetectorParameters::create();
+			aruco_params_thermal_ = cv::aruco::DetectorParameters::create();
 
 			// Initialize empty container for filtered pointcloud
 			last_filtered_pcl_ = boost::make_shared<PCL>();
 
 			// Load ros params
+			nh->getParam("binary_threshold", binary_threshold_);
+			nh->getParam("area_aruco_threshold", area_aruco_threshold_);
+			nh->getParam("binarize_thermal", binarize_thermal_);
 			nh->getParam("rgb_to_gray", rgb_to_gray_);
 			nh->getParam("pcl_intensity_threshold", pcl_intensity_threshold_);
 			nh->getParam("bag_namespace", bag_namespace_);
@@ -94,6 +108,12 @@ class Fuser
 			nh->getParam("remove_watermark", remove_watermark_);
 			nh->getParam("image_width", image_width_);
 			nh->getParam("image_height", image_height_);
+			nh->getParam("translation_thermal_x", tx_thermal_);
+			nh->getParam("translation_thermal_y", ty_thermal_);
+
+			// Spatial offset between thermal and visual source
+			float warp_values[] = {1.0, 0.0, tx_thermal_, 0.0, 1.0, ty_thermal_};
+			translation_thermal_ = new cv::Mat(2, 3, CV_32F, warp_values);
 
 			// Auxiliar black image
 			desired_size_ = cv::Size(image_width_, image_height_);
@@ -178,8 +198,6 @@ class Fuser
 		
 		void fuse(sensor_msgs::CompressedImage rgb_msg, sensor_msgs::CompressedImage thermal_msg, sensor_msgs::PointCloud2 pcl_msg)
 		{
-			ROS_INFO(">> Fusing");
-
 			/// @brief image data
 			cv_bridge::CvImagePtr rgb_image_ptr;
 			cv_bridge::CvImagePtr thermal_image_ptr;
@@ -221,7 +239,6 @@ class Fuser
 			cv::initUndistortRectifyMap(K_thermal_, D_thermal_, R_thermal_, K_thermal_, cv::Size(info_thermal_.width, info_thermal_.height), CV_32FC1, rm1, rm2); // @TODO: mudar isto dependendo se é crow ou raven
 			cv::remap(thermal_image_ptr->image, thermal_image_ptr->image, rm1, rm2, cv::INTER_LINEAR);
 
-			
 			// RESIZE to rgb size
 			cv::resize(thermal_image_ptr->image, thermal_image_ptr->image, rgb_image_ptr->image.size());
 			
@@ -229,12 +246,12 @@ class Fuser
 			if(remove_watermark_) cv::rectangle(thermal_image_ptr->image, cv::Point(460,10), cv::Point(560,70), cv::Scalar(0,0,0), cv::FILLED);
 
 			// Binarize
-			threshold(thermal_image_ptr->image, thermal_image_ptr->image, 128, 255, 0);
+			if (binarize_thermal_) cv::threshold(thermal_image_ptr->image, thermal_image_ptr->image, binary_threshold_, 255, 0);
 
-			// AFFINE (align thermal with rgb)
-			translation_thermal_.at<float>(0, 2) = (1 - last_depth_ / max_depth_) * tx_thermal_;
-			translation_thermal_.at<float>(1, 2) = (1 - last_depth_ / max_depth_) * ty_thermal_;
-			cv::warpAffine(thermal_image_ptr->image, thermal_image_ptr->image, translation_thermal_, thermal_image_ptr->image.size());
+			/// @brief Align thermal and visual sources
+			// Detect visual and thermal aruco markers. If detection, align by centroid displacement, otherwise let hardcoded alignment.
+			bool alignment_possible = find_alignment_rgb_thermal(rgb_image_ptr->image, thermal_image_ptr->image, translation_thermal_);
+			cv::warpAffine(thermal_image_ptr->image, thermal_image_ptr->image, *translation_thermal_, thermal_image_ptr->image.size());
 
 			/* Point Cloud */
 			/// @brief Containers for original & filtered point cloud data
@@ -296,7 +313,6 @@ class Fuser
 				depth = points3D.z; 
 
 				// Saturate depth
-				std::cout << "depth: " << depth << "\n";
 				if(depth >= max_depth_) depth = max_depth_;
 				last_depth_ = depth;
 
@@ -335,11 +351,123 @@ class Fuser
 			/// Publish
 			publish_concatenated_input(concatenated_input, header);
 
+			std::cout << "Saved image samples idx " << num_frames_<< "\n";
+			
 			num_frames_++;
-
-			std::cout << "Saved images idx " << num_frames_<< "\n";
 		}
 		
+		/// @brief Returns centroid and area of detected aruco
+		/// @param x corners in clockwise order
+		/// @param y corners in clockwise order
+		/// @return array of doubles. position 0 and 1 are centroid x and y. position 2 is area
+		std::array<double,3> aruco_centroid_and_area(std::array<double,4> xs, std::array<double,4> ys)
+		{
+			// Initialize area
+			double area = 0.0;
+
+			// Calculate value of shoelace formula
+			int j = 3;
+			for (int i = 0; i < 4; i++)
+			{
+				area += (xs[j] + xs[i]) * (ys[j] - ys[i]);
+				j = i;  // j is previous vertex to i
+			}
+			// Ensemble output
+			std::array<double,3> centroid_and_area;
+			centroid_and_area[0] = 0.5 * (*std::max_element(xs.begin(), xs.end()) + *std::min_element(xs.begin(), xs.end()));
+			centroid_and_area[1] = 0.5 * (*std::max_element(ys.begin(), ys.end()) + *std::min_element(ys.begin(), ys.end()));
+			centroid_and_area[2] = abs(area / 2.0);
+			return centroid_and_area;
+		}
+
+		bool find_alignment_rgb_thermal(cv::Mat visual_image, cv::Mat thermal_image, cv::Ptr<cv::Mat> translation_thermal)
+		{
+			std::vector<int> marker_ids_visual, marker_ids_thermal;
+			std::vector<std::vector<cv::Point2f>> marker_corners_visual, rejected_candidates_visual, marker_corners_thermal, rejected_candidates_thermal;
+			cv::aruco::detectMarkers(visual_image, aruco_dict_, marker_corners_visual, marker_ids_visual, aruco_params_visual_, rejected_candidates_visual);
+			cv::aruco::detectMarkers(thermal_image, aruco_dict_, marker_corners_thermal, marker_ids_thermal, aruco_params_thermal_, rejected_candidates_thermal);
+
+			int num_detections_visual = marker_ids_visual.size();
+			int num_detections_thermal = marker_ids_thermal.size();
+			std::array<double,2> best_centroid_visual, best_centroid_thermal;
+			bool visual_aruco_detected = false;
+			bool thermal_aruco_detected = false;
+			if (num_detections_visual > 0 && num_detections_thermal > 0)
+			{
+				double max_area = -1000;
+				/// @brief Extract the best visual marker detection by excluding false positives
+				for(std::vector<cv::Point2f> detection_corners : marker_corners_visual)
+				{
+					std::array<double,4> xs, ys;
+					for(int i = 0; i < 4; i++)
+					{
+						xs[i] = detection_corners[i].x; 
+						ys[i] = detection_corners[i].y;
+					}	
+
+					std::array<double,3> centroid_and_area = aruco_centroid_and_area(xs, ys);
+					if (num_detections_visual == 1 && centroid_and_area[2] > area_aruco_threshold_)
+					{
+						best_centroid_visual[0] = centroid_and_area[0];
+						best_centroid_visual[1] = centroid_and_area[1];
+						if(!visual_aruco_detected) visual_aruco_detected = true;
+						break;
+					}
+					if (centroid_and_area[2] > area_aruco_threshold_ && centroid_and_area[2] > max_area)
+					{
+						max_area = centroid_and_area[2];
+						best_centroid_visual[0] = centroid_and_area[0];
+						best_centroid_visual[1] = centroid_and_area[1];
+						if(!visual_aruco_detected) visual_aruco_detected = true;
+					}
+				}
+
+				max_area = -1000;
+				/// @brief Extract the best thermal marker detection by excluding false positives
+				for(std::vector<cv::Point2f> detection_corners : marker_corners_thermal)
+				{
+					// Save corners
+					std::array<double,4> xs, ys;
+					for(int i = 0; i < 4; i++)
+					{
+						xs[i] = detection_corners[i].x; 
+						ys[i] = detection_corners[i].y;
+					}	
+					// Find centroid and area of aruco
+					std::array<double,3> centroid_and_area = aruco_centroid_and_area(xs, ys);
+					if (num_detections_thermal == 1 && centroid_and_area[2] > area_aruco_threshold_)
+					{
+						best_centroid_thermal[0] = centroid_and_area[0];
+						best_centroid_thermal[1] = centroid_and_area[1];
+						if(!thermal_aruco_detected) thermal_aruco_detected = true;
+						break;
+					}
+					if (centroid_and_area[2] > area_aruco_threshold_ && centroid_and_area[2] > max_area)
+					{
+						max_area = centroid_and_area[2];
+						best_centroid_thermal[0] = centroid_and_area[0];
+						best_centroid_thermal[1] = centroid_and_area[1];
+						if(!thermal_aruco_detected) thermal_aruco_detected = true;
+					}
+				}
+			}
+			bool alignment_possible = thermal_aruco_detected && visual_aruco_detected;
+			// If both visual and thermal aruco were detected, then assign a translation
+			if(alignment_possible)
+			{
+				ROS_INFO("Automatic alignment between thermal and visual sources executed");
+				translation_thermal_->at<float>(0, 2) = (best_centroid_visual[0] - best_centroid_thermal[0]);
+				translation_thermal_->at<float>(1, 2) = (best_centroid_visual[1] - best_centroid_thermal[1]);
+			}
+			else
+			{
+				translation_thermal_->at<float>(0, 2) = tx_thermal_;
+				translation_thermal_->at<float>(1, 2) = ty_thermal_;
+			}
+			return alignment_possible;
+		}
+
+
 		cv::Mat generate_dataset_sample(cv::Mat visual_channel, cv::Mat thermal_channel, cv::Mat pcl_channel, std::string dataset_folder_path)
 		{
 			cv::Mat output_image;
@@ -347,21 +475,18 @@ class Fuser
 			if (cv::countNonZero(visual_channel) < 1) channels.push_back(black_image_);
 			else 
 			{
-				std::cout << "Writing visual\n";
 				channels.push_back(visual_channel);
 				cv::imwrite(dataset_folder_path + "im-visual-" + std::to_string(num_frames_) + "_" + hash_dir_ + im_format_dataset_, visual_channel);
 			}
 			if (cv::countNonZero(thermal_channel) < 1) channels.push_back(black_image_);
 			else
 			{
-				std::cout << "Writing thermal\n";
 				channels.push_back(thermal_channel);
 				cv::imwrite(dataset_folder_path + "im-thermal-" + std::to_string(num_frames_) + "_" + hash_dir_ + im_format_dataset_, thermal_channel);
 			} 
 			if (cv::countNonZero(pcl_channel) < 1) channels.push_back(black_image_);
 			else 
 			{
-				std::cout << "Writing pcl\n";
 				channels.push_back(pcl_channel);
 				cv::imwrite(dataset_folder_path + "im-pcl-" + std::to_string(num_frames_) + "_" + hash_dir_ + im_format_dataset_, pcl_channel);
 			}
@@ -458,14 +583,19 @@ class Fuser
 		int image_width_, image_height_;
 		cv::Size desired_size_;
 		bool rgb_to_gray_;
+		int binary_threshold_;
+		double area_aruco_threshold_;
 		int pcl_intensity_threshold_;
 		bool sync_sensors_;
 		bool remove_watermark_;
+		bool binarize_thermal_;
 		float max_depth_;
 		float tx_thermal_, ty_thermal_; // Translation to align thermal with visual image
+		cv::Ptr<cv::aruco::Dictionary> aruco_dict_;
+		cv::Ptr<cv::aruco::DetectorParameters> aruco_params_visual_, aruco_params_thermal_;
 		cv::Mat K_thermal_, D_thermal_, R_thermal_;
 		cv::Mat K_rgb_, D_rgb_, R_rgb_;
-		cv::Mat translation_thermal_; // The translation matrix
+		cv::Ptr<cv::Mat> translation_thermal_; // The translation matrix
 		ros::Publisher concatenated_input_pub_;
 		ros::Publisher final_pcl_pub_;
 		std::shared_ptr<ros::NodeHandle> nh_;

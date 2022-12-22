@@ -16,6 +16,11 @@
     <param name="image_height" value="480"/>
     <param name="pcl_intensity_threshold" value="9000"/>
     <param name="rgb_to_gray" value="true"/>
+    <param name="binarize_thermal" value="true"/>
+    <param name="translation_thermal_x" value="12"/>
+    <param name="translation_thermal_y" value="90"/>
+    <param name="area_aruco_threshold" value="0"/>
+    <param name="binary_threshold" value="128"/>
     
     <!-- Variable args-->
     <!-- if namespace is needed put the namespace in topic names-->
@@ -53,6 +58,7 @@
     --topics $(arg topics)
     --rate $(arg bag_freq)
     --clock
+    --quiet
     "/>
 
     <!-- Launch time sync node to synchronize sensors timestamps -->
