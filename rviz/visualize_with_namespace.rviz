@@ -24,7 +24,7 @@ Panels:
   - Class: rviz/Time
     Name: Time
     SyncMode: 0
-    SyncSource: raw 3D LiDAR
+    SyncSource: filtered 3D LiDAR
 Preferences:
   PromptSaveOnExit: true
 Toolbars:
@@ -188,7 +188,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 4.877007484436035
+      Distance: 7.1941633224487305
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -229,4 +229,4 @@ Window Geometry:
     collapsed: false
   Width: 1048
   X: 552
-  Y: 124
+  Y: 27

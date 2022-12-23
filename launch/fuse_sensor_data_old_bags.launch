@@ -1,6 +1,6 @@
 <launch>        
     <!--Args-->
-    <arg name="bag_freq" default="5"/>
+    <arg name="bag_freq" default="4"/>
     <arg name="bag_namespace" default="old"/>
     <arg name="bag_path" default="$(find platform_detector)/bags/$(arg bag_namespace)"/>
 

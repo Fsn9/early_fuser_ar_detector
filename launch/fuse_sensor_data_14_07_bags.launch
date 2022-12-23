@@ -1,6 +1,6 @@
 <launch>        
     <!--Args-->
-    <arg name="bag_freq" default="5"/>
+    <arg name="bag_freq" default="4"/>
     <arg name="bag_namespace" default="14-07-2022"/>
     <arg name="bag_path" default="$(find platform_detector)/bags/$(arg bag_namespace)"/>
     <arg name="namespace" value="raven"/>
@@ -16,7 +16,7 @@
     <param name="remove_watermark" value="false"/>
     <param name="image_width" value="640"/>
     <param name="image_height" value="480"/>
-    <param name="pcl_intensity_threshold" value="9000"/>
+    <param name="pcl_intensity_threshold" value="2000"/>
     <param name="rgb_to_gray" value="true"/>
     <param name="binarize_thermal" value="false"/> <!-- Badly calibrated thermal -->
     <param name="translation_thermal_x" value="12"/>
@@ -77,7 +77,8 @@
     <!-- RIGHT -->
     <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.119842 -0.22668 0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
     <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="-0.119842 0.22668 -0.0570006 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
-    <node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.0570006 0.119842 -0.22668 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />
+    <!--<node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.0570006 0.119842 -0.22668 0.5 0.5 0.5 0.5  camera_frame os_sensor 100" />-->
+    <node pkg="tf" type="static_transform_publisher" name="lidar2cam" args="0.02638 0.02626 0.15379 0 -1.57075 3.1415  camera_frame os_sensor 100" />
     <node pkg="tf" type="static_transform_publisher" name="lidar2os_sensor" args="0 0 0 0 0 0 1  os_sensor lidar 30" />
 
     <!-- Launch fuser node-->

@@ -1,6 +1,6 @@
 <launch>        
     <!--Args-->
-    <arg name="bag_freq" default="5"/>
+    <arg name="bag_freq" default="4"/>
     <arg name="bag_namespace" default="20s-07-2022"/>
     <arg name="bag_path" default="$(find platform_detector)/bags/$(arg bag_namespace)"/>
     <arg name="namespace" value="raven"/>
@@ -16,7 +16,7 @@
     <param name="remove_watermark" value="false"/>
     <param name="image_width" value="640"/>
     <param name="image_height" value="480"/>
-    <param name="pcl_intensity_threshold" value="9000"/>
+    <param name="pcl_intensity_threshold" value="3000"/>
     <param name="rgb_to_gray" value="true"/>
     <param name="binarize_thermal" value="true"/>
     <param name="translation_thermal_x" value="12"/>

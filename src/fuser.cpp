@@ -74,7 +74,6 @@ class Fuser
 			max_depth_ = 7.0;
 			tx_thermal_ = 0;
 			ty_thermal_ = 0;
-			last_depth_ = 0;
 			remove_watermark_ = false;
 
 			// Publishers
@@ -273,20 +272,30 @@ class Fuser
 			
 			/// @brief Crop pointcloud
 			pcl::CropBox<pcl::PointXYZI> crop;
-			crop.setInputCloud(last_filtered_pcl_);
-			crop.setMin(Eigen::Vector4f(-2.0, 0, -2.0, 1.0));
-			crop.setMax(Eigen::Vector4f(2.0, max_depth_, 2.0, 1.0));
-			crop.filter(*last_filtered_pcl_);
+			if (bag_path_.find("20s-07") != std::string::npos || bag_path_.find("14-07") != std::string::npos)
+			{
+				crop.setInputCloud(last_filtered_pcl_);
+				crop.setMin(Eigen::Vector4f(0, -1.0, -2.0, 1.0));
+				crop.setMax(Eigen::Vector4f(max_depth_, 1.0, 2.0, 1.0));
+				crop.filter(*last_filtered_pcl_);
+			}
+			else
+			{
+				crop.setInputCloud(last_filtered_pcl_);
+				crop.setMin(Eigen::Vector4f(-2.0, 0, -2.0, 1.0));
+				crop.setMax(Eigen::Vector4f(2.0, max_depth_, 2.0, 1.0));
+				crop.filter(*last_filtered_pcl_);
+			}
 
 			// Get transform from lidar to the camera frame
 			try
 			{
 				tf_listener_.lookupTransform("/os_sensor", "/camera_frame", ros::Time(0), lidar2cam_tf_);
-    		}
+			}
 			catch (tf::TransformException &ex) 
 			{
 				ROS_WARN("%s",ex.what());
-    		}
+			}
 			/// @brief Transform point cloud frame to camera frame
 			pcl_ros::transformPointCloud(*last_filtered_pcl_, *last_filtered_pcl_, lidar2cam_tf_);
 
@@ -307,27 +316,43 @@ class Fuser
 			cv::Mat pcl_image = cv::Mat::zeros(cv::Size(info_rgb_.width, info_rgb_.height), CV_8UC1);
 			for (pcl::PointXYZI point : last_filtered_pcl_->points)
 			{
-				points3D.x = point.y; // xcam = zlaser
-				points3D.y = point.z; // ycam = xlaser
-				points3D.z = point.x; // zcam = ylaser
-				depth = points3D.z; 
+				if (bag_path_.find("20s-07") != std::string::npos || bag_path_.find("14-07") != std::string::npos)
+				{
+					points3D.x = point.x; // xcam = zlaser
+					points3D.y = point.y; // ycam = xlaser
+					points3D.z = point.z; // zcam = ylaser
+					depth = points3D.z; 
+				}
+				else
+				{
+					points3D.x = point.y; // xcam = zlaser
+					points3D.y = point.z; // ycam = xlaser
+					points3D.z = point.x; // zcam = ylaser
+					depth = points3D.z; 
+				}
 
 				// Saturate depth
 				if(depth >= max_depth_) depth = max_depth_;
-				last_depth_ = depth;
 
 				// Project 3D to 2D
-				points2D = camera_geometry.project3dToPixel(points3D);			
+				points2D = camera_geometry.project3dToPixel(points3D);	
+
+				// Hardcoded Offset to apply to 14-07 bags
+				if(bag_path_.find("20s-07") != std::string::npos || bag_path_.find("14-07") != std::string::npos)
+				{
+					points2D.x += 75;
+					points2D.y -= 45;
+				}
 
 				// If point is intense (reflected by aruco) then save and paint that point
-				if (points2D.x > 0 && points2D.x < info_rgb_.width && points2D.y > 0 && points2D.y < info_rgb_.height && point.intensity > 9000)
+				if (points2D.x > 0 && points2D.x < info_rgb_.width && points2D.y > 0 && points2D.y < info_rgb_.height && point.intensity > pcl_intensity_threshold_)
 				{
 					// Draw pointcloud 2D image
 					pcl_image.at<uchar>((int)points2D.y, (int)points2D.x) = 255 * (1.0 - depth / max_depth_);
 				}
 			}
 			// Dilate image lidar points
-			cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(20,20));
+			cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(30,30));
 			cv::dilate(pcl_image, pcl_image, kernel);
 
 			// Final resize
@@ -568,7 +593,6 @@ class Fuser
 		sensor_msgs::CameraInfo info_thermal_;
 		sensor_msgs::CameraInfo info_rgb_;
 		unsigned int num_frames_;
-		double last_depth_;
 		std::string hash_dir_;
 		std::string im_format_dataset_;
 		std::string dataset_main_dir_;
