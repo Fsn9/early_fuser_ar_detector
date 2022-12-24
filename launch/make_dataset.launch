@@ -1,7 +1,8 @@
 <launch>
 <!-- Launch dataset_maker-->
-<param name="dataset_to_label_folder" value="22-12-2022_17-24-31_bag-20s-07-2022_dataset-thermal-input"/>
-<param name="test_ratio" value="0.1"/>
-<param name="valid_ratio" value="0.1"/>
+<param name="dataset_to_label_folder" value="23-12-2022_21-05-30_bag-20s-07-2022_dataset-visual-input"/>
+<param name="label_entire_dir" value="true"/>
+<param name="test_ratio" value="0.15"/>
+<param name="valid_ratio" value="0.15"/>
 <node pkg="platform_detector" type="dataset_maker.py" name="dataset_maker" output="screen"/>
 </launch>
